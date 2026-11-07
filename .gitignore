@@ -1,0 +1,10 @@
+/target/
+/test_snapshots/
+.DS_Store
+
+# Never commit signing material or deployment-local account configuration.
+*.conf
+.env
+.env.*
+!.env.example
+/deployments/private/
