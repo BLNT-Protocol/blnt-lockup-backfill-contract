@@ -45,10 +45,14 @@ contract, timestamp, or evidence hash.
 - Failed authorization, transfer, balance verification, or arithmetic MUST
   roll back all state changes.
 - The contract MUST reject overfunding so no BLNT becomes stranded surplus.
-- The atomic donor path MUST either complete the designated donor's canonical
-  contributor-grant claim, the requested lockup contribution, both canonical
-  Comet V1.1 LP joins, and both YieldBlent backstop deposits or complete none
-  of them.
+- During backfill the designated donor MUST own the backstop manager and
+  YieldBlox MUST be its high-scope operational manager. While the donor can
+  operate the contract, the atomic donor path MUST either complete the donor's
+  canonical contributor-grant claim, requested lockup contribution, both
+  canonical Comet V1.1 LP joins, and both YieldBlent deposits or complete none
+  of them. If donor access is removed prematurely, the same path MUST claim and
+  fund only the requested lockup amount while retaining the complete one-third
+  manager allocation in the donor wallet.
 - Use checked integer arithmetic and seven-decimal token units. Never use
   floating-point arithmetic in contract code or allocation generation.
 - Bound all maps and loops. Claim and funding entrypoints MUST be constant in

@@ -47,6 +47,13 @@ pub struct Totals {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Manager {
+    pub id: Address,
+    pub scope: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteResult {
     pub donor_retained: i128,
     pub first_backstop_shares: i128,
@@ -55,7 +62,8 @@ pub struct RouteResult {
     pub first_xlm: i128,
     pub lockup_funded: i128,
     pub manager_budget: i128,
-    pub manager_refund: i128,
+    pub manager_retained: i128,
+    pub manager_routed: bool,
     pub second_backstop_shares: i128,
     pub second_blnt: i128,
     pub second_lp: i128,

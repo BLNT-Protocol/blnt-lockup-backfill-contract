@@ -18,8 +18,16 @@ erasing unpaid entitlement, and provides an atomic donor route that:
    canonical BLNT:XLM and BLNT:USDC Comet V1.1 pools;
 4. deposits the resulting LP shares into YieldBlent FirstLoss and SecondLoss;
    and
-5. atomically returns proportional-join rounding dust and leaves all remaining
-   BLNT in the donor wallet.
+5. transfers only the exact BLNT consumed by each join, leaving proportional
+   join rounding and all remaining BLNT in the donor wallet.
+
+During backfill, the designated donor owns the backstop manager and YieldBlox
+is its high-scope operational manager. The donor can execute the atomic funding
+route as owner, while YieldBlox can claim emissions and manage the resulting
+backstop positions. If donor access or the required backstop/pool allowlist is
+removed prematurely, contributor-grant claims continue without the YieldBlent
+route and its complete one-third budget remains in the donor wallet. Ownership
+may be transferred to YieldBlox after backfill is complete.
 
 The intended funding sequence is a direct initial contribution from BLNT
 already held by the donor, followed by optional top-ups from later vested
