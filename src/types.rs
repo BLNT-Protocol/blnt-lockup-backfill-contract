@@ -13,10 +13,12 @@ pub enum BackstopTier {
 pub struct Config {
     pub backstop: Address,
     pub blnt: Address,
+    pub first_blnt_first: bool,
     pub owner: Address,
     pub first_lp: Address,
     pub manager: Address,
     pub pool: Address,
+    pub second_blnt_first: bool,
     pub second_lp: Address,
     pub source_backfill: Address,
     pub usdc: Address,

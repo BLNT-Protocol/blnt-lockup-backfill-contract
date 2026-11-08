@@ -28,14 +28,14 @@ an atomic owner route that:
 6. transfers only the exact BLNT consumed by each join, leaving proportional
    join rounding and all remaining BLNT in the owner wallet.
 
-During backfill, the immutable owner must own the backstop manager. A
-separate manager such as YBX DAO or YSC may operate the position within its
-configured scope while that ownership remains in place, but cannot authorize
-contributor-grant claims. If backstop-manager ownership or the required
-backstop/pool allowlist is removed prematurely, contributor-grant claims
-continue without the YieldBlent route and its complete one-third budget
-remains in the owner wallet. Backstop-manager ownership and management may be
-transferred after backfill is complete.
+Construction verifies the initial backstop-manager ownership and allowlists as
+well as the immutable tier-token and Comet-pair bindings. Each later
+contributor-grant claim attempts the complete route and relies on the manager's
+live authorization and allowlist enforcement. A separate manager such as YBX
+DAO or YSC may operate the position within its configured scope but cannot
+authorize contributor-grant claims. If any manager authorization, allowlist,
+join, or deposit operation fails, the source claim and every related transfer
+roll back atomically so the configuration can be corrected and retried.
 
 The intended funding sequence is a direct initial contribution from BLNT
 already held by the owner, followed by optional top-ups from later vested

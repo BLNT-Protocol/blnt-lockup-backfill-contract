@@ -306,6 +306,9 @@ impl MockManager {
         max_amounts_in: Vec<i128>,
     ) {
         from.require_auth();
+        let owner: Address = e.storage().instance().get(&ManagerKey::Owner).unwrap();
+        let manager: MockManagerRole = e.storage().instance().get(&ManagerKey::Manager).unwrap();
+        assert!(from == owner || (from == manager.id && manager.scope >= 2));
         assert_eq!(
             backstop,
             e.storage().instance().get(&ManagerKey::Backstop).unwrap()
@@ -314,6 +317,11 @@ impl MockManager {
             pool_address,
             e.storage().instance().get(&ManagerKey::Pool).unwrap()
         );
+        assert!(e
+            .storage()
+            .instance()
+            .get::<_, bool>(&ManagerKey::PoolAllowed)
+            .unwrap());
         let lp: Address = match tier {
             BackstopTier::FirstLoss => e.storage().instance().get(&ManagerKey::First).unwrap(),
             BackstopTier::SecondLoss => e.storage().instance().get(&ManagerKey::Second).unwrap(),
@@ -353,10 +361,22 @@ impl MockManager {
         amount: i128,
     ) -> i128 {
         from.require_auth();
+        let owner: Address = e.storage().instance().get(&ManagerKey::Owner).unwrap();
+        let manager: MockManagerRole = e.storage().instance().get(&ManagerKey::Manager).unwrap();
+        assert!(from == owner || (from == manager.id && manager.scope >= 1));
+        assert_eq!(
+            backstop,
+            e.storage().instance().get(&ManagerKey::Backstop).unwrap()
+        );
         assert_eq!(
             pool_address,
             e.storage().instance().get(&ManagerKey::Pool).unwrap()
         );
+        assert!(e
+            .storage()
+            .instance()
+            .get::<_, bool>(&ManagerKey::PoolAllowed)
+            .unwrap());
         let lp: Address = match tier {
             BackstopTier::FirstLoss => e.storage().instance().get(&ManagerKey::First).unwrap(),
             BackstopTier::SecondLoss => e.storage().instance().get(&ManagerKey::Second).unwrap(),
@@ -624,41 +644,59 @@ fn constructor_accepts_owner_with_separate_low_scope_manager() {
 }
 
 #[test]
-fn premature_owner_transfer_retains_the_full_one_third_in_owner() {
+fn premature_owner_transfer_rolls_back_the_entire_claim() {
     let fixture = Fixture::create(900);
     let yieldblox = Address::generate(&fixture.e);
     let manager = MockManagerClient::new(&fixture.e, &fixture.manager);
     manager.set_owner(&yieldblox);
     assert_eq!(manager.manager().id, fixture.operator);
 
-    let result = fixture.client().claim_grant_and_fund();
-
-    assert!(!result.backstop_funded);
-    assert_eq!(result.grant_claimed, 900);
-    assert_eq!(result.lockup_funded, 600);
-    assert_eq!(result.owner_retained, 300);
+    assert!(fixture.client().try_claim_grant_and_fund().is_err());
     assert_eq!(
         MockTokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.owner),
-        300
+        0
     );
     assert_eq!(
         MockTokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.manager),
         0
     );
-    assert_eq!(fixture.client().get_totals().custody, 600);
+    assert_eq!(
+        MockTokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.source),
+        900
+    );
+    assert_eq!(fixture.client().get_totals().custody, 0);
 }
 
 #[test]
-fn removed_manager_allowlist_access_retains_the_full_one_third_in_owner() {
+fn route_succeeds_when_owner_remains_an_authorized_high_scope_manager() {
+    let fixture = Fixture::create(900);
+    let yieldblox = Address::generate(&fixture.e);
+    let manager = MockManagerClient::new(&fixture.e, &fixture.manager);
+    manager.set_owner(&yieldblox);
+    manager.set_manager(&fixture.owner, &2);
+    MockTokenClient::new(&fixture.e, &fixture.xlm).mint(&fixture.manager, &20);
+    MockTokenClient::new(&fixture.e, &fixture.usdc).mint(&fixture.manager, &30);
+
+    let result = fixture.client().claim_grant_and_fund();
+
+    assert!(result.backstop_funded);
+    assert_eq!(result.grant_claimed, 900);
+    assert_eq!(result.lockup_funded, 600);
+    assert_eq!(result.owner_retained, 0);
+}
+
+#[test]
+fn removed_manager_allowlist_access_rolls_back_the_entire_claim() {
     let fixture = Fixture::create(900);
     let manager = MockManagerClient::new(&fixture.e, &fixture.manager);
     manager.set_pool_allowed(&false);
 
-    let result = fixture.client().claim_grant_and_fund();
-
-    assert!(!result.backstop_funded);
-    assert_eq!(result.owner_retained, 300);
-    assert_eq!(fixture.client().get_totals().custody, 600);
+    assert!(fixture.client().try_claim_grant_and_fund().is_err());
+    assert_eq!(
+        MockTokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.source),
+        900
+    );
+    assert_eq!(fixture.client().get_totals().custody, 0);
 }
 
 #[test]

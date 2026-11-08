@@ -21,8 +21,6 @@ pub enum LockupBackfillError {
     BalanceMismatch = 1514,
     ReentrantCall = 1515,
     Overflow = 1516,
-    SourceClaimTooSmall = 1517,
     InvalidRoute = 1518,
-    SlippageExceeded = 1519,
     ClaimsClosed = 1520,
 }

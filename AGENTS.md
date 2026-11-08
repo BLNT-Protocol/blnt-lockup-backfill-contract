@@ -49,17 +49,14 @@ contract, timestamp, or evidence hash.
   the immutable owner may atomically close claims and refund the contract's
   complete remaining BLNT custody to the owner address. Claims MUST remain open
   until that explicit call succeeds.
-- During backfill the immutable owner MUST own the backstop manager. A
-  separately configured operational manager does not gain authority over the
-  owner claim. While the owner owns the manager, the atomic owner path MUST
-  either
-  complete the owner's canonical contributor-grant claim, automatically
-  bounded lockup contribution, both internally quoted canonical Comet V1.1 LP
-  joins, and both YieldBlent deposits or complete none of them. The Comet joins
-  MUST use the fixed 1% counterasset slippage ceiling. If owner access is
-  removed prematurely, the same path MUST claim and fund only the automatically
-  bounded lockup amount while retaining the complete one-third manager
-  allocation in the owner wallet.
+- Construction MUST verify the initial backstop-manager ownership, allowlists,
+  tier tokens, and Comet pairs. Later owner-route calls MUST attempt the full
+  route and rely on the manager's live authorization and allowlist enforcement;
+  they MUST NOT preflight or fall back around a manager failure. The owner's
+  canonical contributor-grant claim, automatically bounded lockup
+  contribution, both internally quoted canonical Comet V1.1 LP joins, and
+  both YieldBlent deposits MUST all complete or all roll back. The Comet joins
+  MUST use the fixed 1% counterasset slippage ceiling.
 - `claim_grant_and_fund()` MUST accept no route arguments and return only the
   grant claimed, lockup funding, whether the backstop was funded, and total
   owner retention. Detailed per-tier accounting MUST remain in its event.
