@@ -1,6 +1,6 @@
 use soroban_sdk::{contractclient, Address, Env, Vec};
 
-use crate::{BackstopTier, Manager};
+use crate::BackstopTier;
 
 #[allow(dead_code)]
 #[contractclient(name = "SourceBackfillClient")]
@@ -15,7 +15,6 @@ pub trait SourceBackfill {
 #[contractclient(name = "BackstopManagerClient")]
 pub trait BackstopManager {
     fn owner(e: Env) -> Address;
-    fn manager(e: Env) -> Manager;
     fn backstops(e: Env) -> Vec<Address>;
     fn pools(e: Env) -> Vec<Address>;
     fn c_join_pool(
@@ -46,5 +45,7 @@ pub trait Backstop {
 #[allow(dead_code)]
 #[contractclient(name = "CometClient")]
 pub trait Comet {
+    fn get_balance(e: Env, token: Address) -> i128;
+    fn get_total_supply(e: Env) -> i128;
     fn get_tokens(e: Env) -> Vec<Address>;
 }

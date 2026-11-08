@@ -13,7 +13,7 @@ pub enum BackstopTier {
 pub struct Config {
     pub backstop: Address,
     pub blnt: Address,
-    pub donor: Address,
+    pub owner: Address,
     pub first_lp: Address,
     pub manager: Address,
     pub pool: Address,
@@ -47,26 +47,28 @@ pub struct Totals {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Manager {
-    pub id: Address,
-    pub scope: u32,
+pub struct GrantFundingResult {
+    pub backstop_funded: bool,
+    pub owner_retained: i128,
+    pub grant_claimed: i128,
+    pub lockup_funded: i128,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RouteResult {
-    pub donor_retained: i128,
+pub struct GrantFundingDetails {
+    pub backstop_budget: i128,
+    pub backstop_funded: bool,
+    pub backstop_unspent: i128,
+    pub owner_retained: i128,
     pub first_backstop_shares: i128,
     pub first_blnt: i128,
     pub first_lp: i128,
     pub first_xlm: i128,
+    pub grant_claimed: i128,
     pub lockup_funded: i128,
-    pub manager_budget: i128,
-    pub manager_retained: i128,
-    pub manager_routed: bool,
     pub second_backstop_shares: i128,
     pub second_blnt: i128,
     pub second_lp: i128,
     pub second_usdc: i128,
-    pub source_claimed: i128,
 }

@@ -30,9 +30,9 @@ The production deployment MUST bind:
   `CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS`;
 - canonical deployed BLNT backfill contract:
   `CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA`;
-- designated donor account supplied as an immutable constructor argument and
+- immutable owner account supplied as a constructor argument and
   recorded only in the deployment record, not hardcoded in repository source;
-  the designated donor is also the immutable refund owner;
+  the owner is also the source contributor-grant recipient and refund recipient;
 - V3 backstop:
   `CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO`;
 - YieldBlent pool:
@@ -42,8 +42,8 @@ The production deployment MUST bind:
 - YieldBlent SecondLoss token, the canonical BLNT:USDC Comet V1.1 LP:
   `CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3`;
 - a verified backstop-manager instance deployed and configured before this
-  contract, which the designated donor can operate either as its owner or as
-  its configured high-scope manager; its production contract address remains
+  contract, which the immutable owner controls throughout the backfill period;
+  its production contract address remains
   an open deployment binding until that instance is deployed and independently
   verified;
 - the source backfill contract's immutable contributor-grant vesting start
@@ -59,15 +59,15 @@ those source contributor-grant timestamps; it MUST NOT restart when this
 contract is deployed or funded.
 
 Before production construction, deployment verification MUST establish that
-the designated donor is either the bound manager's owner or its configured
-manager with high scope, that the manager recognizes the V3 backstop and
-YieldBlent pool, can invoke high-scope Comet joins and medium-scope backstop
-deposits, and resolves the two tier tokens to the exact canonical LP addresses
-above. A mismatch MUST block deployment. The designated donor MUST retain at
-least one of those two roles while contributor-grant claims still require the
-atomic route. If the donor is the owner, a separate high-scope operational
-manager MAY manage the position. Ownership and management MAY be transferred
-after the backfill period is complete.
+the immutable owner owns the bound manager, that the manager recognizes the
+V3 backstop and YieldBlent pool, that the owner can invoke high-scope Comet
+joins and medium-scope backstop deposits, and that the two tier tokens resolve
+to the exact canonical LP addresses above. A mismatch MUST block deployment.
+The owner MUST retain backstop-manager ownership while contributor-grant
+claims still require the atomic route. A separate operational manager,
+including YBX DAO or YSC, MAY manage the position under its configured scope
+without gaining authority over owner claims. Backstop-manager ownership and
+management MAY be transferred after the backfill period is complete.
 
 Network-specific test deployments MAY use different bindings, but tests and
 deployment records MUST label them unambiguously and preserve all production
@@ -137,7 +137,7 @@ alter vesting.
 
 Construction MUST leave claims open. Time alone MUST NOT expire or otherwise
 change claims, funding, or vesting. Claims remain open until the designated
-donor explicitly closes them through the refund entrypoint defined below.
+owner explicitly closes them through the refund entrypoint defined below.
 
 ## 5. Funding
 
@@ -159,48 +159,52 @@ refund, governance, or allocation rights.
 Direct funding MUST fail after claims have been explicitly closed so newly
 transferred BLNT cannot become stranded.
 
-### 5.2 Atomic donor claim, lockup funding, and YieldBlent deposit
+### 5.2 Atomic owner claim, lockup funding, and YieldBlent deposit
 
-`claim_source_route_and_fund(...) -> RouteResult` MUST:
+`claim_grant_and_fund() -> GrantFundingResult` MUST:
 
-1. require authorization by the immutable designated donor;
-2. invoke `claim_grant(designated_donor)` on the canonical source backfill
+1. require authorization by the immutable owner;
+2. invoke `claim_grant(owner)` on the canonical source backfill
    contract and read the exact positive amount `C` returned;
 3. calculate the manager BLNT route as `M = floor(C / 3)`;
 4. calculate the FirstLoss BLNT budget as `F = floor(M / 2)` and the SecondLoss
    BLNT budget as `S = M - F`, assigning any odd raw unit to SecondLoss;
-5. accept an explicit non-negative lockup-funding amount `L` and require
-   `L <= C - M`;
-6. reject `L` if it would overfund outstanding replacement entitlements;
-7. transfer exactly `L` BLNT from the donor to this contract and verify exact
+5. calculate the remaining replacement-claim funding gap as aggregate
+   outstanding entitlement less current contract BLNT custody, floored at
+   zero;
+6. while claims are open, set the lockup-funding amount `L` to the lesser of
+   that funding gap and `C - M`; after claims are closed, set `L = 0`;
+7. transfer exactly `L` BLNT from the owner to this contract and verify exact
    receipt;
-8. when the donor can still operate the bound manager, transfer only the exact
-   positive BLNT amounts `F_used <= F` and `S_used <= S` required by the two
-   caller-bounded proportional joins and verify exact receipt;
-9. use exactly `F_used` BLNT and sufficient XLM held by the manager to join the
+8. when the owner still owns the bound manager, derive the greatest
+   positive proportional LP output from each live Comet reserve composition
+   whose rounded BLNT input does not exceed `F` or `S`;
+9. derive each proportional counterasset input using Comet V1.1's upward
+   rounding and set its immutable maximum to `ceil(derived_input * 1.01)`;
+10. transfer only the exact positive BLNT amounts `F_used <= F` and
+   `S_used <= S` derived for those joins and verify exact receipt;
+11. use exactly `F_used` BLNT and sufficient XLM held by the manager to join the
    canonical BLNT:XLM Comet V1.1 LP;
-10. deposit every LP share minted by that join into YieldBlent FirstLoss for
+12. deposit every LP share minted by that join into YieldBlent FirstLoss for
     the manager contract;
-11. use exactly `S_used` BLNT and sufficient USDC held by the manager to join
+13. use exactly `S_used` BLNT and sufficient USDC held by the manager to join
     the canonical BLNT:USDC Comet V1.1 LP;
-12. deposit every LP share minted by that join into YieldBlent SecondLoss for
-    the manager contract; and
-13. leave `M - F_used - S_used` in the donor wallet without transferring it to
+14. deposit every LP share minted by that join into YieldBlent SecondLoss for
+    the manager contract;
+15. leave `M - F_used - S_used` in the owner wallet without transferring it to
     the manager; and
-14. return whether the manager route ran, the source amount, manager budget and
-    amount retained, lockup funding, per-tier BLNT consumed, LP shares minted,
-    and backstop shares received.
+16. return the grant amount claimed, lockup funding, whether both backstop
+    deposits completed, and total BLNT retained by the owner.
 
-If the donor no longer owns the manager and is no longer its configured
-high-scope manager, or if the bound backstop or pool has been removed from the
-manager allowlists, the entrypoint MUST skip both joins and deposits. It MUST
-still complete the source grant claim and requested lockup funding, and the
-entire `M` allocation MUST remain in the donor wallet. Caller-supplied join
-parameters are ignored on this fallback path. A manager fallback is not
-permitted for a substituted backstop tier token or Comet pair; those immutable
-binding mismatches MUST fail the call.
+If the owner no longer owns the manager, or if the bound backstop or pool has
+been removed from the manager allowlists, the entrypoint MUST skip both joins
+and deposits. It MUST still complete the source grant claim and automatically
+bounded lockup funding,
+and the entire `M` allocation MUST remain in the owner wallet. A manager
+fallback is not permitted for a substituted backstop tier token or Comet pair;
+those immutable binding mismatches MUST fail the call.
 
-The donor MUST retain `C - L - F_used - S_used`. This includes both the
+The owner MUST retain `C - L - F_used - S_used`. This includes both the
 ordinary post-manager remainder and any unconsumed part of `M`; on the
 fallback path it includes all of `M`. The one-third route is measured in BLNT;
 the XLM and USDC required to mint the LPs are separate manager-provided
@@ -212,44 +216,57 @@ transfer to the manager, both LP joins, and both backstop deposits MUST be one
 atomic call tree. Failure of any authorization, balance check, slippage bound,
 LP join, tier resolution, or backstop deposit MUST roll back the entire source
 claim and every transfer. Before claiming the contributor grant, every route
-invocation MUST determine whether the donor still owns the mutable external
-manager or remains its configured high-scope manager and whether the manager
-still recognizes the bound backstop and pool. It MUST also revalidate that the
-backstop still resolves the expected tier tokens and each Comet token pair
-remains exact. A later loss of donor access or allowlist removal therefore
-selects the donor-retention fallback instead of redirecting or stranding
+invocation MUST determine whether the owner still owns the mutable external
+manager and whether the manager still recognizes the bound backstop and pool.
+It MUST also revalidate that the backstop still resolves the expected tier
+tokens and each Comet token pair
+remains exact. A later loss of owner access or allowlist removal therefore
+selects the owner-retention fallback instead of redirecting or stranding
 assets. Direct funding and beneficiary claims remain independent of the
 manager.
 
-The caller MUST provide the exact positive BLNT input, bounded LP output, and
-bounded counterasset input for both joins. Because a proportional Comet join
-mints an integer number of LP raw units, the caller SHOULD obtain the exact
-BLNT inputs through a recent simulation. The implementation MUST snapshot the
-manager's BLNT and both LP balances around each join, verify that FirstLoss
-consumes exactly `F_used`, verify that SecondLoss consumes exactly `S_used`,
-verify each minted LP delta, and deposit exactly that delta. `F_used` and
-`S_used` MUST NOT exceed their respective budgets. The difference
-`M - F_used - S_used` MUST never leave the donor. The manager's liquid balances
-of the two LP tokens and BLNT MUST return to their respective pre-route values
-after the deposits. No routed BLNT or newly minted LP token may remain idle in
-the manager.
+For each tier, the implementation MUST query the bound Comet pool's current
+total LP supply, BLNT reserve, counterasset reserve, and token list. It MUST
+reproduce Comet V1.1 proportional-join upward rounding, derive the greatest LP
+output whose rounded BLNT input remains within the tier budget, use that exact
+BLNT amount as the BLNT maximum, and use 101% of the derived counterasset input
+rounded upward as the XLM or USDC maximum. A zero output, zero reserve, zero
+supply, invalid pair, arithmetic overflow, or input outside those limits MUST
+fail atomically.
 
-The entrypoint MUST NOT infer the lockup contribution, transfer more than the
-explicit `L`, substitute legacy BLND, select a different pool or tier, or route
-funds to an unverified manager.
+The implementation MUST snapshot the manager's BLNT, counterasset, and LP
+balances around each join, verify that FirstLoss consumes exactly `F_used`,
+verify that SecondLoss consumes exactly `S_used`, enforce the fixed 1%
+counterasset ceiling, verify each minted LP delta, and deposit exactly that
+delta. `F_used` and `S_used` MUST NOT exceed their respective budgets. The
+difference `M - F_used - S_used` MUST never leave the owner. The manager's
+liquid balances of the two LP tokens and BLNT MUST return to their respective
+pre-route values after the deposits. No routed BLNT or newly minted LP token
+may remain idle in the manager.
+
+The entrypoint MUST NOT accept caller-selected route amounts or slippage,
+substitute legacy BLND, select a different pool or tier, or route funds to an
+unverified manager.
+
+The successful call MUST emit detailed accounting containing the grant amount,
+lockup funding, backstop budget and unspent portion, whether the backstop route
+completed, owner retention, and the BLNT, XLM or USDC, LP shares, and backstop
+shares used for each tier. These audit fields MUST NOT expand the compact
+`GrantFundingResult` return value.
 
 BLNT already claimed before this contract exists MUST be contributed through
 `fund`; it cannot be retroactively coupled to an earlier source claim.
 The intended funding sequence is an initial direct contribution of already
-claimed BLNT followed by explicit top-ups from later contributor-grant claims.
-Once the replacement obligation is fully funded, `L = 0` MUST remain valid so
-the donor can continue claiming the contributor grant and completing the
-manager route without overfunding this contract.
+claimed BLNT followed by automatically bounded top-ups from later
+contributor-grant claims. Once the replacement obligation is fully funded,
+the inferred `L` MUST remain zero so the owner can continue claiming the
+contributor grant and completing the manager route without overfunding this
+contract.
 
-After claims have been explicitly closed, the atomic donor route MUST reject a
-positive lockup-funding amount. A zero lockup-funding amount MAY continue to
-claim the donor's source grant and execute or skip the independently
-configured manager route under the ordinary rules.
+After claims have been explicitly closed, the atomic owner route MUST infer a
+zero lockup-funding amount. It MAY continue to claim the owner's source grant
+and execute or skip the independently configured manager route under the
+ordinary rules.
 
 ## 6. Beneficiary claims under partial funding
 
@@ -281,15 +298,15 @@ for every beneficiary to receive the full amount.
 
 `expire_claims() -> i128` MUST atomically:
 
-1. require authorization by the immutable designated donor;
+1. require authorization by the immutable owner;
 2. reject if claims have already been closed;
 3. mark claims permanently closed;
 4. transfer the contract's complete remaining BLNT balance, if positive, to
-   that donor;
-5. verify the exact contract debit and donor balance increase for a positive
+   that owner;
+5. verify the exact contract debit and owner balance increase for a positive
    refund;
 6. leave immutable allocations and historical claimed progress unchanged; and
-7. emit the donor, refunded amount, and aggregate claimed amount.
+7. emit the owner, refunded amount, and aggregate claimed amount.
 
 The entrypoint MUST NOT accept a caller-selected recipient, transfer another
 asset, or confer refund rights on a funder. Before the entrypoint succeeds,
@@ -303,7 +320,7 @@ API and cannot be recovered through a second closure call.
 The contract SHOULD expose only the views required to independently verify:
 
 - BLNT and source-backfill bindings;
-- designated donor;
+- immutable owner;
 - backstop-manager, V3 backstop, YieldBlent pool, and both canonical Comet LP
   bindings;
 - source vesting start and end;
@@ -332,14 +349,14 @@ The contract MUST:
 - maintain and renew instance and persistent-state TTLs through normal calls;
 - contain no administrator, upgrade, allocation mutation, arbitrary
   withdrawal, mint, burn, or arbitrary-call entrypoint; the sole
-  recovery path is the donor-authorized, BLNT-only claim closure and refund
+  recovery path is the owner-authorized, BLNT-only claim closure and refund
   defined above; and
 - include source repository metadata in release WASM.
 
 The supported `fund` paths MUST prevent overfunding, and deployment
 instructions MUST warn against direct token transfers. Any BLNT sent directly
 to the contract remains unavailable until beneficiary claims consume it or the
-one-time closure returns the remaining balance to the donor.
+one-time closure returns the remaining balance to the owner.
 
 ## 10. Required tests
 
@@ -359,26 +376,28 @@ Tests MUST cover:
   budget;
 - equal BLNT budgets across the BLNT:XLM and BLNT:USDC joins before an odd raw
   unit is assigned to SecondLoss;
-- bounded proportional-join rounding with all unused BLNT retained by the
-  donor without entering manager custody;
-- successful construction and routing both while the donor owns the manager
-  contract and while the donor is its configured high-scope manager;
-- rejection when the donor is only a lower-scope manager or has neither
-  authorized role;
-- source claim and lockup funding with the full one-third retained by the donor
-  after donor ownership or required allowlist access is removed prematurely;
+- live-reserve proportional-join derivation matching Comet V1.1 upward
+  rounding, including a budget that cannot mint one LP raw unit;
+- exact BLNT maxima, fixed 1% XLM/USDC maxima rounded upward, and all unused
+  BLNT retained by the owner without entering manager custody;
+- successful construction and routing while the owner owns the manager and a
+  separate operational manager is configured;
+- rejection when the owner is the configured manager, at any scope, but does
+  not own the manager contract;
+- source claim and lockup funding with the full one-third retained by the owner
+  after owner access or required allowlist access is removed prematurely;
 - manager counterasset underfunding and per-join slippage failures;
 - rejection of substituted managers, pools, tiers, and LP tokens;
 - exact LP balance deltas and complete FirstLoss and SecondLoss deposits;
 - rollback when either the first or second join or deposit fails;
-- attempts to fund more than the post-manager remainder of the same source
-  claim;
-- already-claimed donor funds through `fund`;
+- automatic lockup funding capped by both the post-manager remainder and the
+  current aggregate funding gap;
+- already-claimed owner funds through `fund`;
 - transfer failures, reentrancy, overflow, and state rollback;
 - full funding and full distribution with zero remaining entitlement;
 - claims and funding remaining open until explicit closure;
-- rejection of closure without donor authorization;
-- exact full-custody refund to the donor at closure, including balance-delta
+- rejection of closure without owner authorization;
+- exact full-custody refund to the owner at closure, including balance-delta
   verification, zero-custody closure, repeated-closure rejection, and
   unchanged claim progress;
 - permanent rejection of beneficiary claims and new lockup funding after

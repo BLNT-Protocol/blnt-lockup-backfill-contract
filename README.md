@@ -11,29 +11,34 @@ same aggregate total.
 The contract preserves the deployed BLNT backfill contract's original
 360-day contributor-grant vesting epoch, supports partial funding without
 erasing unpaid entitlement, and keeps replacement claims open until the
-designated donor explicitly closes them. The donor may close all remaining
+immutable owner explicitly closes them. The owner may close all remaining
 claims at any time and atomically return the complete remaining BLNT custody to
-the donor wallet. The contract also provides an atomic donor route that:
+the owner wallet. The no-argument `claim_grant_and_fund()` entrypoint provides
+an atomic owner route that:
 
-1. claims the designated donor's currently vested contributor grant;
-2. reserves an explicit portion for lockup-owner claims;
+1. claims the immutable owner's currently vested contributor grant;
+2. automatically funds as much of the outstanding lockup-owner obligation as
+   possible from the two-thirds not reserved for the manager route;
 3. budgets one-third of the source claim equally by BLNT amount across the
    canonical BLNT:XLM and BLNT:USDC Comet V1.1 pools;
-4. deposits the resulting LP shares into YieldBlent FirstLoss and SecondLoss;
+4. derives both proportional joins from current Comet reserves and supply with
+   a fixed 1% XLM/USDC slippage ceiling;
+5. deposits the resulting LP shares into YieldBlent FirstLoss and SecondLoss;
    and
-5. transfers only the exact BLNT consumed by each join, leaving proportional
-   join rounding and all remaining BLNT in the donor wallet.
+6. transfers only the exact BLNT consumed by each join, leaving proportional
+   join rounding and all remaining BLNT in the owner wallet.
 
-During backfill, the designated donor must be able to operate the backstop
-manager either as its owner or as its configured high-scope manager. A
-separate high-scope manager may operate the position while the donor remains
-owner. If donor access or the required backstop/pool allowlist is removed
-prematurely, contributor-grant claims continue without the YieldBlent route
-and its complete one-third budget remains in the donor wallet. Ownership and
-management may be transferred after backfill is complete.
+During backfill, the immutable owner must own the backstop manager. A
+separate manager such as YBX DAO or YSC may operate the position within its
+configured scope while that ownership remains in place, but cannot authorize
+contributor-grant claims. If backstop-manager ownership or the required
+backstop/pool allowlist is removed prematurely, contributor-grant claims
+continue without the YieldBlent route and its complete one-third budget
+remains in the owner wallet. Backstop-manager ownership and management may be
+transferred after backfill is complete.
 
 The intended funding sequence is a direct initial contribution from BLNT
-already held by the donor, followed by optional top-ups from later vested
+already held by the owner, followed by optional top-ups from later vested
 contributor-grant claims. A zero top-up remains valid after the replacement
 claims are fully funded.
 
