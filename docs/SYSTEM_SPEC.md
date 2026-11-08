@@ -32,6 +32,7 @@ The production deployment MUST bind:
   `CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA`;
 - designated donor account supplied as an immutable constructor argument and
   recorded only in the deployment record, not hardcoded in repository source;
+  the designated donor is also the immutable refund owner;
 - V3 backstop:
   `CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO`;
 - YieldBlent pool:
@@ -41,10 +42,10 @@ The production deployment MUST bind:
 - YieldBlent SecondLoss token, the canonical BLNT:USDC Comet V1.1 LP:
   `CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3`;
 - a verified backstop-manager instance deployed and configured before this
-  contract, owned during backfill by the designated donor and operated by a
-  high-scope YieldBlox manager; its production contract and YieldBlox manager
-  addresses remain open deployment bindings until that instance is deployed
-  and independently verified;
+  contract, which the designated donor can operate either as its owner or as
+  its configured high-scope manager; its production contract address remains
+  an open deployment binding until that instance is deployed and independently
+  verified;
 - the source backfill contract's immutable contributor-grant vesting start
   returned by `get_grant_vesting_start()`; and
 - the source backfill contract's immutable contributor-grant vesting end
@@ -58,13 +59,15 @@ those source contributor-grant timestamps; it MUST NOT restart when this
 contract is deployed or funded.
 
 Before production construction, deployment verification MUST establish that
-the designated donor owns the bound manager, that YieldBlox is its configured
-high-scope manager, that the manager recognizes the V3 backstop and YieldBlent
-pool, can invoke high-scope Comet joins and medium-scope backstop deposits, and
-resolves the two tier tokens to the exact canonical LP addresses above. A
-mismatch MUST block deployment. The designated donor MAY transfer ownership to
-YieldBlox after the backfill period is complete; ownership MUST NOT be
-transferred while contributor-grant claims still require the atomic route.
+the designated donor is either the bound manager's owner or its configured
+manager with high scope, that the manager recognizes the V3 backstop and
+YieldBlent pool, can invoke high-scope Comet joins and medium-scope backstop
+deposits, and resolves the two tier tokens to the exact canonical LP addresses
+above. A mismatch MUST block deployment. The designated donor MUST retain at
+least one of those two roles while contributor-grant claims still require the
+atomic route. If the donor is the owner, a separate high-scope operational
+manager MAY manage the position. Ownership and management MAY be transferred
+after the backfill period is complete.
 
 Network-specific test deployments MAY use different bindings, but tests and
 deployment records MUST label them unambiguously and preserve all production
@@ -119,7 +122,7 @@ the V1 portions omitted from the production claimant manifest. The source
 backfill allocations assigned to three lockup contract addresses remain
 unchanged and inaccessible through this contract.
 
-## 4. Vesting
+## 4. Vesting and claim closure
 
 For beneficiary allocation `A`, source vesting start `S`, source vesting end
 `E`, and current ledger timestamp `T`, cumulative vested BLNT MUST equal:
@@ -130,7 +133,11 @@ For beneficiary allocation `A`, source vesting start `S`, source vesting end
 
 Vesting MUST accrue per second from the original source contract's deployment
 epoch. Funding time, claim time, and this contract's deployment time MUST NOT
-alter vesting. Claims MUST remain available indefinitely after vesting ends.
+alter vesting.
+
+Construction MUST leave claims open. Time alone MUST NOT expire or otherwise
+change claims, funding, or vesting. Claims remain open until the designated
+donor explicitly closes them through the refund entrypoint defined below.
 
 ## 5. Funding
 
@@ -148,6 +155,9 @@ alter vesting. Claims MUST remain available indefinitely after vesting ends.
 
 Any address MAY fund the contract. Funding creates no ownership, withdrawal,
 refund, governance, or allocation rights.
+
+Direct funding MUST fail after claims have been explicitly closed so newly
+transferred BLNT cannot become stranded.
 
 ### 5.2 Atomic donor claim, lockup funding, and YieldBlent deposit
 
@@ -236,6 +246,11 @@ Once the replacement obligation is fully funded, `L = 0` MUST remain valid so
 the donor can continue claiming the contributor grant and completing the
 manager route without overfunding this contract.
 
+After claims have been explicitly closed, the atomic donor route MUST reject a
+positive lockup-funding amount. A zero lockup-funding amount MAY continue to
+claim the donor's source grant and execute or skip the independently
+configured manager route under the ordinary rules.
+
 ## 6. Beneficiary claims under partial funding
 
 `claim(beneficiary) -> i128` MUST:
@@ -262,7 +277,28 @@ in ledger order. This may delay later claimants but MUST NOT reduce their
 recorded entitlement. Funding MUST eventually reach the aggregate allocation
 for every beneficiary to receive the full amount.
 
-## 7. Accounting and views
+## 7. Claim closure and refund
+
+`expire_claims() -> i128` MUST atomically:
+
+1. require authorization by the immutable designated donor;
+2. reject if claims have already been closed;
+3. mark claims permanently closed;
+4. transfer the contract's complete remaining BLNT balance, if positive, to
+   that donor;
+5. verify the exact contract debit and donor balance increase for a positive
+   refund;
+6. leave immutable allocations and historical claimed progress unchanged; and
+7. emit the donor, refunded amount, and aggregate claimed amount.
+
+The entrypoint MUST NOT accept a caller-selected recipient, transfer another
+asset, or confer refund rights on a funder. Before the entrypoint succeeds,
+beneficiary claims and funding remain available. After it succeeds,
+beneficiary claims and new lockup funding MUST fail permanently even when the
+refund amount was zero. A later direct token transfer is outside the supported
+API and cannot be recovered through a second closure call.
+
+## 8. Accounting and views
 
 The contract SHOULD expose only the views required to independently verify:
 
@@ -271,6 +307,7 @@ The contract SHOULD expose only the views required to independently verify:
 - backstop-manager, V3 backstop, YieldBlent pool, and both canonical Comet LP
   bindings;
 - source vesting start and end;
+- whether claims have been closed;
 - each beneficiary's immutable allocation, cumulative vested amount,
   cumulative claimed amount, and currently payable amount;
 - aggregate allocated, claimed, outstanding, funded-custody, and funding-gap
@@ -280,8 +317,10 @@ The contract SHOULD expose only the views required to independently verify:
 `currently payable` MUST reflect both vesting and current contract custody.
 `outstanding` MUST include vested and unvested unclaimed allocations.
 `funding gap` MUST equal outstanding allocation less current BLNT custody.
+After closure, `outstanding` and `funding gap` remain historical accounting
+values and do not reopen claims or authorize new funding.
 
-## 8. Security and lifecycle
+## 9. Security and lifecycle
 
 The contract MUST:
 
@@ -291,15 +330,18 @@ The contract MUST:
 - verify exact token balance deltas;
 - reject its own address as a funder or beneficiary;
 - maintain and renew instance and persistent-state TTLs through normal calls;
-- contain no administrator, upgrade, allocation mutation, sweep, withdrawal,
-  recovery, mint, burn, or arbitrary-call entrypoint; and
+- contain no administrator, upgrade, allocation mutation, arbitrary
+  withdrawal, mint, burn, or arbitrary-call entrypoint; the sole
+  recovery path is the donor-authorized, BLNT-only claim closure and refund
+  defined above; and
 - include source repository metadata in release WASM.
 
-An accidental excess token transfer made directly to the contract cannot be
-recovered. The supported `fund` paths MUST prevent overfunding, and deployment
-instructions MUST warn against direct token transfers.
+The supported `fund` paths MUST prevent overfunding, and deployment
+instructions MUST warn against direct token transfers. Any BLNT sent directly
+to the contract remains unavailable until beneficiary claims consume it or the
+one-time closure returns the remaining balance to the donor.
 
-## 9. Required tests
+## 10. Required tests
 
 Tests MUST cover:
 
@@ -319,8 +361,10 @@ Tests MUST cover:
   unit is assigned to SecondLoss;
 - bounded proportional-join rounding with all unused BLNT retained by the
   donor without entering manager custody;
-- successful routing while the donor owns the manager contract and YieldBlox
-  is a separate high-scope operational manager;
+- successful construction and routing both while the donor owns the manager
+  contract and while the donor is its configured high-scope manager;
+- rejection when the donor is only a lower-scope manager or has neither
+  authorized role;
 - source claim and lockup funding with the full one-third retained by the donor
   after donor ownership or required allowlist access is removed prematurely;
 - manager counterasset underfunding and per-join slippage failures;
@@ -331,7 +375,14 @@ Tests MUST cover:
   claim;
 - already-claimed donor funds through `fund`;
 - transfer failures, reentrancy, overflow, and state rollback;
-- full funding and full distribution with zero remaining entitlement; and
+- full funding and full distribution with zero remaining entitlement;
+- claims and funding remaining open until explicit closure;
+- rejection of closure without donor authorization;
+- exact full-custody refund to the donor at closure, including balance-delta
+  verification, zero-custody closure, repeated-closure rejection, and
+  unchanged claim progress;
+- permanent rejection of beneficiary claims and new lockup funding after
+  closure; and
 - TTL extension and restoration behavior.
 
 Production deployment acceptance MUST independently reproduce the allocation

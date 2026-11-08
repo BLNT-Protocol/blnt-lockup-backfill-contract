@@ -202,19 +202,16 @@ impl MockManager {
         e: Env,
         owner: Address,
         manager: Address,
+        scope: u32,
         first: Address,
         second: Address,
         backstop: Address,
         pool: Address,
     ) {
         e.storage().instance().set(&ManagerKey::Owner, &owner);
-        e.storage().instance().set(
-            &ManagerKey::Manager,
-            &Manager {
-                id: manager,
-                scope: 2,
-            },
-        );
+        e.storage()
+            .instance()
+            .set(&ManagerKey::Manager, &Manager { id: manager, scope });
         e.storage().instance().set(&ManagerKey::First, &first);
         e.storage().instance().set(&ManagerKey::Second, &second);
         e.storage().instance().set(&ManagerKey::Backstop, &backstop);
@@ -347,11 +344,37 @@ impl Fixture {
         Self::create_with_options(source_claim, true)
     }
 
+    fn create_as_high_scope_manager(source_claim: i128) -> Self {
+        Self::create_with_manager_access(source_claim, true, false, true, 2)
+    }
+
+    fn create_as_manager_with_scope(source_claim: i128, scope: u32) -> Self {
+        Self::create_with_manager_access(source_claim, true, false, true, scope)
+    }
+
+    fn create_without_manager_access(source_claim: i128) -> Self {
+        Self::create_with_manager_access(source_claim, true, false, false, 2)
+    }
+
+    fn create_as_owner_with_manager_scope(source_claim: i128, scope: u32) -> Self {
+        Self::create_with_manager_access(source_claim, true, true, false, scope)
+    }
+
     fn create_without_auth(source_claim: i128) -> Self {
         Self::create_with_options(source_claim, false)
     }
 
     fn create_with_options(source_claim: i128, mock_auths: bool) -> Self {
+        Self::create_with_manager_access(source_claim, mock_auths, true, false, 2)
+    }
+
+    fn create_with_manager_access(
+        source_claim: i128,
+        mock_auths: bool,
+        donor_is_owner: bool,
+        donor_is_manager: bool,
+        manager_scope: u32,
+    ) -> Self {
         let e = Env::default();
         if mock_auths {
             e.mock_all_auths();
@@ -372,12 +395,22 @@ impl Fixture {
         let second_lp = e.register(MockLp, (vec![&e, usdc.clone(), blnt.clone()],));
         let backstop = e.register(MockBackstop, (first_lp.clone(), second_lp.clone()));
         let pool = Address::generate(&e);
-        let operator = Address::generate(&e);
+        let manager_owner = if donor_is_owner {
+            donor.clone()
+        } else {
+            Address::generate(&e)
+        };
+        let operator = if donor_is_manager {
+            donor.clone()
+        } else {
+            Address::generate(&e)
+        };
         let manager = e.register(
             MockManager,
             (
-                donor.clone(),
+                manager_owner,
                 operator.clone(),
+                manager_scope,
                 first_lp.clone(),
                 second_lp.clone(),
                 backstop.clone(),
@@ -522,6 +555,54 @@ fn atomic_route_works_with_donor_owner_and_separate_high_scope_manager() {
         MockLpClient::new(&fixture.e, &fixture.second_lp).balance(&fixture.backstop),
         11
     );
+}
+
+#[test]
+fn construction_and_route_work_with_donor_as_high_scope_manager() {
+    let fixture = Fixture::create_as_high_scope_manager(900);
+    let manager = MockManagerClient::new(&fixture.e, &fixture.manager);
+    assert_ne!(manager.owner(), fixture.donor);
+    assert_eq!(manager.manager().id, fixture.donor);
+    assert_eq!(manager.manager().scope, 2);
+
+    MockTokenClient::new(&fixture.e, &fixture.xlm).mint(&fixture.manager, &20);
+    MockTokenClient::new(&fixture.e, &fixture.usdc).mint(&fixture.manager, &30);
+    let result = fixture
+        .client()
+        .claim_source_route_and_fund(&200, &150, &10, &20, &150, &11, &30);
+
+    assert!(result.manager_routed);
+    assert_eq!(result.manager_retained, 0);
+    assert_eq!(result.donor_retained, 400);
+    assert_eq!(
+        MockLpClient::new(&fixture.e, &fixture.first_lp).balance(&fixture.backstop),
+        10
+    );
+    assert_eq!(
+        MockLpClient::new(&fixture.e, &fixture.second_lp).balance(&fixture.backstop),
+        11
+    );
+}
+
+#[test]
+#[should_panic]
+fn constructor_rejects_donor_as_lower_scope_manager() {
+    Fixture::create_as_manager_with_scope(900, 1);
+}
+
+#[test]
+#[should_panic]
+fn constructor_rejects_donor_without_an_authorized_manager_role() {
+    Fixture::create_without_manager_access(900);
+}
+
+#[test]
+fn constructor_accepts_donor_owner_with_lower_scope_manager() {
+    let fixture = Fixture::create_as_owner_with_manager_scope(900, 0);
+    let manager = MockManagerClient::new(&fixture.e, &fixture.manager);
+    assert_eq!(manager.owner(), fixture.donor);
+    assert_ne!(manager.manager().id, fixture.donor);
+    assert_eq!(manager.manager().scope, 0);
 }
 
 #[test]
@@ -682,7 +763,82 @@ fn authorization_is_required_for_every_mutating_entrypoint() {
         .client()
         .try_claim_source_route_and_fund(&100, &150, &10, &20, &150, &10, &20)
         .is_err());
+    assert!(fixture.client().try_expire_claims().is_err());
     assert_eq!(fixture.client().get_totals().custody, 0);
+}
+
+#[test]
+fn expire_claims_is_available_immediately_and_refunds_all_custody() {
+    let fixture = Fixture::create(900);
+    let funder = Address::generate(&fixture.e);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    token.mint(&funder, &1_100);
+    let client = fixture.client();
+    client.fund(&funder, &1_000);
+    let beneficiary = fixture.beneficiaries.get_unchecked(0);
+    assert_eq!(client.get_claim(&beneficiary).payable, 1_000);
+    assert!(!client.claims_closed());
+
+    assert_eq!(client.claim(&beneficiary), 1_000);
+    assert_eq!(client.fund(&funder, &100), 100);
+    assert_eq!(client.get_claim(&beneficiary).payable, 100);
+
+    let donor_before = token.balance(&fixture.donor);
+    let totals_before = client.get_totals();
+    assert_eq!(client.expire_claims(), 100);
+    assert!(client.claims_closed());
+    assert_eq!(token.balance(&fixture.donor), donor_before + 100);
+    assert_eq!(token.balance(&fixture.contract), 0);
+    assert_eq!(client.get_claim(&beneficiary).payable, 0);
+    assert!(client.try_claim(&beneficiary).is_err());
+    token.mint(&funder, &1);
+    assert!(client.try_fund(&funder, &1).is_err());
+    let totals_after = client.get_totals();
+    assert_eq!(totals_after.claimed, totals_before.claimed);
+    assert_eq!(totals_after.outstanding, totals_before.outstanding);
+    assert_eq!(totals_after.custody, 0);
+    assert!(client.try_expire_claims().is_err());
+}
+
+#[test]
+fn expiring_claims_requires_donor_authorization() {
+    let fixture = Fixture::create_without_auth(900);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    token.mint(&fixture.contract, &100);
+
+    assert!(fixture.client().try_expire_claims().is_err());
+    assert!(!fixture.client().claims_closed());
+    assert_eq!(token.balance(&fixture.contract), 100);
+    assert_eq!(token.balance(&fixture.donor), 0);
+}
+
+#[test]
+fn route_funding_remains_open_until_explicit_closure() {
+    let fixture = Fixture::create(900);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    MockTokenClient::new(&fixture.e, &fixture.xlm).mint(&fixture.manager, &20);
+    MockTokenClient::new(&fixture.e, &fixture.usdc).mint(&fixture.manager, &30);
+    let result = fixture
+        .client()
+        .claim_source_route_and_fund(&200, &150, &10, &20, &150, &11, &30);
+    assert_eq!(result.lockup_funded, 200);
+    assert_eq!(fixture.client().get_totals().custody, 200);
+    assert_eq!(fixture.client().expire_claims(), 200);
+    assert!(fixture.client().claims_closed());
+    assert_eq!(token.balance(&fixture.contract), 0);
+}
+
+#[test]
+fn zero_custody_expiration_closes_claims_and_blocks_lockup_funding() {
+    let fixture = Fixture::create(900);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    assert_eq!(fixture.client().expire_claims(), 0);
+    assert!(fixture.client().claims_closed());
+    assert!(fixture
+        .client()
+        .try_claim_source_route_and_fund(&1, &150, &10, &20, &150, &11, &30)
+        .is_err());
+    assert_eq!(token.balance(&fixture.source), 900);
 }
 
 #[test]

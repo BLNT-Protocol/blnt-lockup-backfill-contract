@@ -24,4 +24,5 @@ pub enum LockupBackfillError {
     SourceClaimTooSmall = 1517,
     InvalidRoute = 1518,
     SlippageExceeded = 1519,
+    ClaimsClosed = 1520,
 }

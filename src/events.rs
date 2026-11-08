@@ -23,6 +23,14 @@ struct RouteEvent {
     result: RouteResult,
 }
 
+#[contractevent(topics = ["expire"], data_format = "vec")]
+struct ExpireClaimsEvent {
+    #[topic]
+    owner: Address,
+    amount: i128,
+    total_claimed: i128,
+}
+
 pub fn fund(e: &Env, from: Address, amount: i128, balance: i128) {
     FundEvent {
         from,
@@ -43,4 +51,13 @@ pub fn claim(e: &Env, beneficiary: Address, amount: i128, total_claimed: i128) {
 
 pub fn route(e: &Env, result: RouteResult) {
     RouteEvent { result }.publish(e);
+}
+
+pub fn expire_claims(e: &Env, owner: Address, amount: i128, total_claimed: i128) {
+    ExpireClaimsEvent {
+        owner,
+        amount,
+        total_claimed,
+    }
+    .publish(e);
 }

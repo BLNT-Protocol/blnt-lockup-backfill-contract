@@ -10,7 +10,10 @@ same aggregate total.
 
 The contract preserves the deployed BLNT backfill contract's original
 360-day contributor-grant vesting epoch, supports partial funding without
-erasing unpaid entitlement, and provides an atomic donor route that:
+erasing unpaid entitlement, and keeps replacement claims open until the
+designated donor explicitly closes them. The donor may close all remaining
+claims at any time and atomically return the complete remaining BLNT custody to
+the donor wallet. The contract also provides an atomic donor route that:
 
 1. claims the designated donor's currently vested contributor grant;
 2. reserves an explicit portion for lockup-owner claims;
@@ -21,13 +24,13 @@ erasing unpaid entitlement, and provides an atomic donor route that:
 5. transfers only the exact BLNT consumed by each join, leaving proportional
    join rounding and all remaining BLNT in the donor wallet.
 
-During backfill, the designated donor owns the backstop manager and YieldBlox
-is its high-scope operational manager. The donor can execute the atomic funding
-route as owner, while YieldBlox can claim emissions and manage the resulting
-backstop positions. If donor access or the required backstop/pool allowlist is
-removed prematurely, contributor-grant claims continue without the YieldBlent
-route and its complete one-third budget remains in the donor wallet. Ownership
-may be transferred to YieldBlox after backfill is complete.
+During backfill, the designated donor must be able to operate the backstop
+manager either as its owner or as its configured high-scope manager. A
+separate high-scope manager may operate the position while the donor remains
+owner. If donor access or the required backstop/pool allowlist is removed
+prematurely, contributor-grant claims continue without the YieldBlent route
+and its complete one-third budget remains in the donor wallet. Ownership and
+management may be transferred after backfill is complete.
 
 The intended funding sequence is a direct initial contribution from BLNT
 already held by the donor, followed by optional top-ups from later vested
@@ -35,8 +38,9 @@ contributor-grant claims. A zero top-up remains valid after the replacement
 claims are fully funded.
 
 The contract cannot mint BLNT and has no administrator, upgrade, allocation
-mutation, sweep, or recovery path. See [the system specification](docs/SYSTEM_SPEC.md)
-for the normative requirements and deployment bindings.
+mutation, arbitrary recovery, or caller-selected refund recipient. See [the
+system specification](docs/SYSTEM_SPEC.md) for the normative requirements and
+deployment bindings.
 
 ## Development
 

@@ -29,6 +29,12 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(e, LockupBackfillError::Overflow))
 }
 
+fn require_claims_open(e: &Env) {
+    if storage::claims_closed(e) {
+        panic_with_error!(e, LockupBackfillError::ClaimsClosed);
+    }
+}
+
 fn contains(values: &Vec<Address>, expected: &Address) -> bool {
     values.iter().any(|value| value == *expected)
 }
@@ -90,7 +96,11 @@ fn claim_state(e: &Env, beneficiary: &Address) -> ClaimState {
     ClaimState {
         allocation,
         claimed,
-        payable: vested_unclaimed.min(custody),
+        payable: if !storage::claims_closed(e) {
+            vested_unclaimed.min(custody)
+        } else {
+            0
+        },
         unclaimed,
         vested,
     }
@@ -116,16 +126,19 @@ fn validate_route_bindings(e: &Env, config: &Config) {
     }
 }
 
-fn manager_route_available(e: &Env, config: &Config) -> bool {
+fn donor_can_operate_manager(e: &Env, config: &Config) -> bool {
     let client = BackstopManagerClient::new(e, &config.manager);
-    let owner = client.owner();
-    let authorized = if owner == config.donor {
+    if client.owner() == config.donor {
         true
     } else {
         let manager = client.manager();
         manager.id == config.donor && manager.scope >= 2
-    };
-    authorized
+    }
+}
+
+fn manager_route_available(e: &Env, config: &Config) -> bool {
+    let client = BackstopManagerClient::new(e, &config.manager);
+    donor_can_operate_manager(e, config)
         && contains(&client.backstops(), &config.backstop)
         && contains(&client.pools(), &config.pool)
 }
@@ -133,7 +146,7 @@ fn manager_route_available(e: &Env, config: &Config) -> bool {
 fn validate_manager(e: &Env, config: &Config) {
     validate_route_bindings(e, config);
     let client = BackstopManagerClient::new(e, &config.manager);
-    if client.owner() != config.donor || client.manager().scope < 2 {
+    if !donor_can_operate_manager(e, config) {
         panic_with_error!(e, LockupBackfillError::InvalidManager);
     }
     if !contains(&client.backstops(), &config.backstop) {
@@ -263,7 +276,6 @@ impl BlntLockupBackfillContract {
         {
             panic_with_error!(&e, LockupBackfillError::InvalidVesting);
         }
-
         let mut allocations = Map::new(&e);
         let mut total = 0_i128;
         for (beneficiary, amount) in allocation_list.iter() {
@@ -302,6 +314,7 @@ impl BlntLockupBackfillContract {
         validate_manager(&e, &config);
         storage::set_config(&e, &config);
         storage::set_allocations(&e, &allocations);
+        storage::set_claims_closed(&e, false);
         storage::set_progress(&e, &Map::new(&e));
         storage::set_total_claimed(&e, 0);
         storage::set_lock(&e, false);
@@ -316,6 +329,7 @@ impl BlntLockupBackfillContract {
         }
         from.require_auth();
         let config = storage::get_config(&e);
+        require_claims_open(&e);
         storage::set_lock(&e, true);
         let contract = e.current_contract_address();
         let balance = TokenClient::new(&e, &config.blnt).balance(&contract);
@@ -335,6 +349,8 @@ impl BlntLockupBackfillContract {
         storage::extend(&e);
         require_unlocked(&e);
         beneficiary.require_auth();
+        let config = storage::get_config(&e);
+        require_claims_open(&e);
         storage::set_lock(&e, true);
         let state = claim_state(&e, &beneficiary);
         if state.payable <= 0 {
@@ -348,7 +364,6 @@ impl BlntLockupBackfillContract {
 
         storage::set_progress(&e, &progress);
         storage::set_total_claimed(&e, total_claimed);
-        let config = storage::get_config(&e);
         transfer(
             &e,
             &config.blnt,
@@ -378,6 +393,9 @@ impl BlntLockupBackfillContract {
         config.donor.require_auth();
         if lockup_amount < 0 {
             panic_with_error!(&e, LockupBackfillError::InvalidAmount);
+        }
+        if lockup_amount > 0 && storage::claims_closed(&e) {
+            panic_with_error!(&e, LockupBackfillError::ClaimsClosed);
         }
 
         storage::set_lock(&e, true);
@@ -488,6 +506,32 @@ impl BlntLockupBackfillContract {
         };
         events::route(&e, result.clone());
         result
+    }
+
+    pub fn expire_claims(e: Env) -> i128 {
+        storage::extend(&e);
+        require_unlocked(&e);
+        let config = storage::get_config(&e);
+        config.donor.require_auth();
+        if storage::claims_closed(&e) {
+            panic_with_error!(&e, LockupBackfillError::ClaimsClosed);
+        }
+
+        storage::set_lock(&e, true);
+        storage::set_claims_closed(&e, true);
+        let contract = e.current_contract_address();
+        let amount = TokenClient::new(&e, &config.blnt).balance(&contract);
+        if amount > 0 {
+            transfer(&e, &config.blnt, &contract, &config.donor, amount);
+        }
+        storage::set_lock(&e, false);
+        events::expire_claims(&e, config.donor, amount, storage::get_total_claimed(&e));
+        amount
+    }
+
+    pub fn claims_closed(e: Env) -> bool {
+        storage::extend(&e);
+        storage::claims_closed(&e)
     }
 
     pub fn get_config(e: Env) -> Config {

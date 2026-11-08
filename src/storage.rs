@@ -10,10 +10,22 @@ const TTL_BUMP: u32 = 180 * ONE_DAY_LEDGERS;
 #[contracttype]
 enum Key {
     Allocations,
+    ClaimsClosed,
     Config,
     Lock,
     Progress,
     TotalClaimed,
+}
+
+pub fn claims_closed(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&Key::ClaimsClosed)
+        .unwrap_or(false)
+}
+
+pub fn set_claims_closed(e: &Env, closed: bool) {
+    e.storage().instance().set(&Key::ClaimsClosed, &closed);
 }
 
 pub fn extend(e: &Env) {

@@ -11,7 +11,8 @@ verified owners of four immutable `blend-lockup v1.0.0` contracts.
 The contract corrects an address-attribution problem without modifying the
 deployed BLNT backfill contract, minting BLNT, assuming custody of issuer
 authority, or changing any existing allocation. Keep the implementation
-narrowly limited to funding, vesting, claiming, and read-only accounting.
+narrowly limited to funding, vesting, claiming, donor-authorized claim closure
+and refund, and read-only accounting.
 
 ## Normative source
 
@@ -44,21 +45,25 @@ contract, timestamp, or evidence hash.
 - A successful payout increments progress by exactly the transferred amount.
 - Failed authorization, transfer, balance verification, or arithmetic MUST
   roll back all state changes.
-- The contract MUST reject overfunding so no BLNT becomes stranded surplus.
-- During backfill the designated donor MUST own the backstop manager and
-  YieldBlox MUST be its high-scope operational manager. While the donor can
-  operate the contract, the atomic donor path MUST either complete the donor's
-  canonical contributor-grant claim, requested lockup contribution, both
-  canonical Comet V1.1 LP joins, and both YieldBlent deposits or complete none
-  of them. If donor access is removed prematurely, the same path MUST claim and
-  fund only the requested lockup amount while retaining the complete one-third
-  manager allocation in the donor wallet.
+- The contract MUST reject overfunding while claims are open. At any time, only
+  the designated donor may atomically close claims and refund the contract's
+  complete remaining BLNT custody to the donor address. Claims MUST remain open
+  until that explicit call succeeds.
+- During backfill the designated donor MUST be able to operate the backstop
+  manager either as its owner or as its configured high-scope manager. While
+  the donor can operate the contract, the atomic donor path MUST either
+  complete the donor's canonical contributor-grant claim, requested lockup
+  contribution, both canonical Comet V1.1 LP joins, and both YieldBlent
+  deposits or complete none of them. If donor access is removed prematurely,
+  the same path MUST claim and fund only the requested lockup amount while
+  retaining the complete one-third manager allocation in the donor wallet.
 - Use checked integer arithmetic and seven-decimal token units. Never use
   floating-point arithmetic in contract code or allocation generation.
 - Bound all maps and loops. Claim and funding entrypoints MUST be constant in
   the number of beneficiaries.
-- Do not add an administrator, upgrade, sweep, recovery, governance, or
-  beneficiary-mutation path.
+- Do not add an administrator, upgrade, arbitrary recovery,
+  governance, or beneficiary-mutation path. The only recovery path is the
+  specified donor-authorized BLNT claim closure and refund.
 
 ## Development workflow
 
@@ -69,8 +74,8 @@ contract changes:
 2. Add or update focused native tests.
 3. Test authorization, vesting boundaries, rounding, partial funding,
    repeated claims, overfunding, the one-third manager split, both LP joins,
-   both YieldBlent deposits, reentrancy, token-balance mismatches, arithmetic
-   boundaries, and rollback.
+   both YieldBlent deposits, closure authorization,
+   reentrancy, token-balance mismatches, arithmetic boundaries, and rollback.
 4. Build optimized `wasm32v1-none` WASM with the pinned toolchain.
 5. Verify source metadata and record the optimized WASM hash before any
    deployment proposal.
