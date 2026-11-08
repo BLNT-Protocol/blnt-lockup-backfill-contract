@@ -3,9 +3,9 @@ use crate::{
 };
 use soroban_sdk::{
     contract, contractimpl, contracttype,
-    testutils::{Address as _, Ledger},
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
     token::TokenClient,
-    vec, Address, Env, Vec,
+    vec, Address, Env, IntoVal, Vec,
 };
 
 const ALLOCATION_0: i128 = 8_892_037_498_416;
@@ -26,7 +26,15 @@ enum BackstopTier {
 #[derive(Clone)]
 #[contracttype]
 enum TokenKey {
+    Allowance(Address, Address),
     Balance(Address),
+}
+
+#[derive(Clone)]
+#[contracttype]
+struct MockAllowance {
+    amount: i128,
+    expiration_ledger: u32,
 }
 
 #[contract]
@@ -45,6 +53,25 @@ fn set_token_balance(e: &Env, address: &Address, amount: i128) {
         .set(&TokenKey::Balance(address.clone()), &amount);
 }
 
+fn token_allowance(e: &Env, from: &Address, spender: &Address) -> i128 {
+    let allowance = e
+        .storage()
+        .persistent()
+        .get::<_, MockAllowance>(&TokenKey::Allowance(from.clone(), spender.clone()));
+    match allowance {
+        Some(value) if value.expiration_ledger >= e.ledger().sequence() => value.amount,
+        _ => 0,
+    }
+}
+
+fn move_token(e: &Env, from: &Address, to: &Address, amount: i128) {
+    assert!(amount >= 0);
+    let from_balance = token_balance(e, from);
+    assert!(from_balance >= amount);
+    set_token_balance(e, from, from_balance - amount);
+    set_token_balance(e, to, token_balance(e, to) + amount);
+}
+
 #[contractimpl]
 impl MockToken {
     pub fn decimals(_e: Env) -> u32 {
@@ -55,17 +82,50 @@ impl MockToken {
         token_balance(&e, &address)
     }
 
+    pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
+        token_allowance(&e, &from, &spender)
+    }
+
+    pub fn approve(e: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
+        from.require_auth();
+        assert!(amount >= 0);
+        assert!(amount == 0 || expiration_ledger >= e.ledger().sequence());
+        e.storage().persistent().set(
+            &TokenKey::Allowance(from, spender),
+            &MockAllowance {
+                amount,
+                expiration_ledger,
+            },
+        );
+    }
+
     pub fn mint(e: Env, to: Address, amount: i128) {
         set_token_balance(&e, &to, token_balance(&e, &to) + amount);
     }
 
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
+        move_token(&e, &from, &to, amount);
+    }
+
+    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) {
+        spender.require_auth();
         assert!(amount >= 0);
-        let from_balance = token_balance(&e, &from);
-        assert!(from_balance >= amount);
-        set_token_balance(&e, &from, from_balance - amount);
-        set_token_balance(&e, &to, token_balance(&e, &to) + amount);
+        let allowance = token_allowance(&e, &from, &spender);
+        assert!(allowance >= amount);
+        e.storage().persistent().set(
+            &TokenKey::Allowance(from.clone(), spender.clone()),
+            &MockAllowance {
+                amount: allowance - amount,
+                expiration_ledger: e
+                    .storage()
+                    .persistent()
+                    .get::<_, MockAllowance>(&TokenKey::Allowance(from.clone(), spender))
+                    .unwrap()
+                    .expiration_ledger,
+            },
+        );
+        move_token(&e, &from, &to, amount);
     }
 }
 
@@ -173,6 +233,10 @@ impl MockSource {
         let blnt: Address = e.storage().instance().get(&SourceKey::Blnt).unwrap();
         TokenClient::new(&e, &blnt).transfer(&e.current_contract_address(), &user, &claim);
         claim
+    }
+
+    pub fn set_claim(e: Env, claim: i128) {
+        e.storage().instance().set(&SourceKey::Claim, &claim);
     }
 
     pub fn get_blnt_token(e: Env) -> Address {
@@ -591,6 +655,13 @@ impl Fixture {
                 allocation_list,
             ),
         );
+        if !mock_auths {
+            e.mock_all_auths();
+        }
+        TokenClient::new(&e, &blnt).approve(&owner, &contract, &i128::MAX, &u32::MAX);
+        if !mock_auths {
+            e.set_auths(&[]);
+        }
 
         Self {
             e,
@@ -662,6 +733,85 @@ fn claim_and_fund_splits_blnt_between_lockups_and_manager() {
     assert_eq!(blnt.balance(&fixture.manager), 300);
     assert_eq!(blnt.balance(&fixture.owner), 0);
     assert_eq!(blnt.balance(&fixture.source), 0);
+}
+
+#[test]
+fn claim_and_fund_auth_remains_valid_when_the_grant_changes_after_preparation() {
+    let fixture = Fixture::create(900);
+    fixture.e.set_auths(&[]);
+
+    let source_invocation = MockAuthInvoke {
+        contract: &fixture.source,
+        fn_name: "claim_grant",
+        args: vec![&fixture.e, fixture.owner.clone().into_val(&fixture.e)],
+        sub_invokes: &[],
+    };
+    let source_invocations = [source_invocation];
+    let prepared_owner_invocation = MockAuthInvoke {
+        contract: &fixture.contract,
+        fn_name: "claim_and_fund",
+        args: vec![&fixture.e],
+        sub_invokes: &source_invocations,
+    };
+
+    MockSourceClient::new(&fixture.e, &fixture.source).set_claim(&905);
+    MockTokenClient::new(&fixture.e, &fixture.blnt).mint(&fixture.source, &5);
+    fixture
+        .e
+        .ledger()
+        .set_timestamp(fixture.e.ledger().timestamp() + 5);
+
+    let result = fixture
+        .client()
+        .mock_auths(&[MockAuth {
+            address: &fixture.owner,
+            invoke: &prepared_owner_invocation,
+        }])
+        .claim_and_fund();
+
+    assert_eq!(result, 905);
+    let blnt = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    assert_eq!(blnt.balance(&fixture.contract), 604);
+    assert_eq!(blnt.balance(&fixture.manager), 301);
+    assert_eq!(
+        blnt.allowance(&fixture.owner, &fixture.contract),
+        i128::MAX - 905
+    );
+}
+
+#[test]
+fn insufficient_allowance_rolls_back_the_source_claim_and_transfers() {
+    let fixture = Fixture::create(900);
+    let blnt = TokenClient::new(&fixture.e, &fixture.blnt);
+    blnt.approve(&fixture.owner, &fixture.contract, &899, &u32::MAX);
+
+    assert!(fixture.client().try_claim_and_fund().is_err());
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    assert_eq!(token.balance(&fixture.source), 900);
+    assert_eq!(token.balance(&fixture.owner), 0);
+    assert_eq!(token.balance(&fixture.contract), 0);
+    assert_eq!(token.balance(&fixture.manager), 0);
+    assert_eq!(token.allowance(&fixture.owner, &fixture.contract), 899);
+}
+
+#[test]
+fn expired_allowance_rolls_back_the_source_claim_and_transfers() {
+    let fixture = Fixture::create(900);
+    let blnt = TokenClient::new(&fixture.e, &fixture.blnt);
+    let expiration_ledger = fixture.e.ledger().sequence() + 1;
+    blnt.approve(&fixture.owner, &fixture.contract, &900, &expiration_ledger);
+    fixture
+        .e
+        .ledger()
+        .set_sequence_number(expiration_ledger + 1);
+
+    assert!(fixture.client().try_claim_and_fund().is_err());
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    assert_eq!(token.balance(&fixture.source), 900);
+    assert_eq!(token.balance(&fixture.owner), 0);
+    assert_eq!(token.balance(&fixture.contract), 0);
+    assert_eq!(token.balance(&fixture.manager), 0);
+    assert_eq!(token.allowance(&fixture.owner, &fixture.contract), 0);
 }
 
 #[test]

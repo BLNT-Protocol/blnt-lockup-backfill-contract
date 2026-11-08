@@ -249,10 +249,10 @@ impl BlntLockupBackfillContract {
         };
 
         if lockup_amount > 0 {
-            blnt.transfer(&config.owner, &contract, &lockup_amount);
+            blnt.transfer_from(&contract, &config.owner, &contract, &lockup_amount);
         }
         if manager_amount > 0 {
-            blnt.transfer(&config.owner, &config.manager, &manager_amount);
+            blnt.transfer_from(&contract, &config.owner, &config.manager, &manager_amount);
         }
         let owner_retained = checked_sub(
             &e,

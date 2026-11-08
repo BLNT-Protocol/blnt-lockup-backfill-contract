@@ -172,23 +172,32 @@ transferred BLNT cannot become stranded.
    zero;
 6. while claims are open, set the lockup-funding amount `L` to the lesser of
    that funding gap and `C - M`; after claims are closed, set `L = 0`;
-7. transfer exactly `L` BLNT from the owner to this contract;
-8. transfer exactly `M` BLNT from the owner to the bound backstop manager;
-9. verify that contract custody increased by exactly `L`, manager custody
+7. require a pre-existing BLNT allowance from the owner to this contract
+   sufficient for `L + M`;
+8. use that allowance to transfer exactly `L` BLNT from the owner to this
+   contract;
+9. use that allowance to transfer exactly `M` BLNT from the owner to the bound
+   backstop manager;
+10. verify that contract custody increased by exactly `L`, manager custody
    increased by exactly `M`, and the owner retained exactly `C - L - M` from
    the source claim;
-10. emit `C`, `L`, `M`, and the owner-retained amount; and
-11. return exactly the grant amount `C` claimed from the source backfill
+11. emit `C`, `L`, `M`, and the owner-retained amount; and
+12. return exactly the grant amount `C` claimed from the source backfill
     contract.
 
 The source claim, lockup contribution, and manager funding MUST be one atomic
 call tree. A failed authorization, ownership check, source claim, transfer, or
 balance reconciliation MUST roll back the entire source claim and every
-transfer. Direct funding and beneficiary claims remain independent of the
-manager. BLNT transferred to the manager is intentionally left in its custody
-until the owner or an authorized operational manager performs later LP and
-backstop operations. This contract MUST NOT select pools or tiers, calculate
-Comet joins, transfer counterassets, deposit LP shares, or claim emissions.
+transfer. The owner's signed authorization tree MUST NOT bind the
+execution-time `L` or `M` amounts: contributor-grant vesting can advance
+between simulation and submission, so the contract MUST perform the dynamic
+transfers as the pre-approved spender. An insufficient or expired allowance
+MUST fail atomically and leave the source grant claimable. Direct funding and
+beneficiary claims remain independent of the manager. BLNT transferred to the
+manager is intentionally left in its custody until the owner or an authorized
+operational manager performs later LP and backstop operations. This contract
+MUST NOT select pools or tiers, calculate Comet joins, transfer counterassets,
+deposit LP shares, or claim emissions.
 
 BLNT already claimed before this contract exists MUST be contributed through
 `fund`; it cannot be retroactively coupled to an earlier source claim.
@@ -310,6 +319,10 @@ Tests MUST cover:
 - first-come custody consumption without entitlement loss;
 - direct funding, overfunding rejection, and exact balance verification;
 - atomic source claim, lockup funding, and exact one-third manager funding;
+- owner authorization remaining valid when contributor-grant vesting advances
+  between authorization preparation and execution;
+- allowance consumption across both dynamic transfers and complete rollback
+  when the allowance is insufficient or expired;
 - manager ownership verification at construction and immediately before each
   owner grant claim;
 - complete rollback when manager ownership is transferred prematurely;

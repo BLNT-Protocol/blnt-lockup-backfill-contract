@@ -47,6 +47,14 @@ already held by the owner, followed by optional top-ups from later vested
 contributor-grant claims. A zero top-up remains valid after the replacement
 claims are fully funded.
 
+Before invoking `claim_and_fund()`, the owner must approve this contract as a
+BLNT spender for an amount and expiration sufficient to cover the inferred
+lockup and manager transfers. The allowance keeps those execution-time amounts
+out of the owner's signed invocation tree, so continued per-second vesting
+between simulation and submission cannot invalidate the authorization. An
+insufficient or expired allowance causes the complete operation, including the
+source grant claim, to roll back.
+
 The contract cannot mint BLNT and has no administrator, upgrade, allocation
 mutation, arbitrary recovery, or caller-selected refund recipient. See [the
 system specification](docs/SYSTEM_SPEC.md) for the normative requirements and
