@@ -8,7 +8,6 @@ pub enum LockupBackfillError {
     InvalidToken = 1501,
     InvalidAllocation = 1502,
     DuplicateBeneficiary = 1503,
-    AllocationTotalMismatch = 1504,
     InvalidVesting = 1505,
     InvalidManager = 1506,
     InvalidBackstop = 1507,

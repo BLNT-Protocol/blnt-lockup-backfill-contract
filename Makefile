@@ -1,7 +1,8 @@
 SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-lockup-backfill-contract
 WASM := target/wasm32v1-none/optimized/blnt_lockup_backfill_contract.wasm
 
-.PHONY: build verify-source-metadata test check fmt clean
+.PHONY: build verify-source-metadata validate-production-allocations \
+	production-allocation-args test-production-allocations test check fmt clean
 
 build:
 	stellar contract build --package blnt-lockup-backfill-contract --locked \
@@ -14,7 +15,16 @@ verify-source-metadata:
 		grep -Fq "source_repo: github:BLNT-Protocol/blnt-lockup-backfill-contract" || \
 		{ printf 'error: missing source_repo metadata in lockup backfill WASM\n' >&2; exit 1; }
 
-test:
+validate-production-allocations:
+	bash scripts/validate-production-allocations.sh validate
+
+production-allocation-args:
+	@bash scripts/validate-production-allocations.sh print-constructor-arg
+
+test-production-allocations:
+	bash scripts/validate-production-allocations.sh self-test
+
+test: test-production-allocations
 	cargo fmt --all -- --check
 	cargo clippy --all-targets --all-features --locked -- -D warnings
 	cargo test --all-features --locked

@@ -1,10 +1,9 @@
 use crate::{
-    allocations,
     clients::{BackstopClient, BackstopManagerClient, CometClient, SourceBackfillClient},
     errors::LockupBackfillError,
     events, storage,
-    types::{BackstopTier, ClaimState, Config, GrantFundingDetails, GrantFundingResult, Totals},
-    BENEFICIARY_COUNT, TOTAL_ALLOCATION, VESTING_DURATION_SECONDS,
+    types::{BackstopTier, ClaimAndFundDetails, ClaimState, Config, Totals},
+    VESTING_DURATION_SECONDS,
 };
 use soroban_sdk::{
     contract, contractimpl, panic_with_error, token::TokenClient, Address, Env, Map, Vec, I256,
@@ -284,8 +283,7 @@ impl BlntLockupBackfillContract {
         allocation_list: Vec<(Address, i128)>,
     ) {
         let contract = e.current_contract_address();
-        if allocation_list.len() != BENEFICIARY_COUNT
-            || owner == contract
+        if owner == contract
             || manager == contract
             || source_backfill == contract
             || blnt == first_lp
@@ -323,15 +321,6 @@ impl BlntLockupBackfillContract {
             total = checked_add(&e, total, amount);
             allocations.set(beneficiary, amount);
         }
-        if total != TOTAL_ALLOCATION {
-            panic_with_error!(&e, LockupBackfillError::AllocationTotalMismatch);
-        }
-        for (beneficiary, amount) in allocations::canonical(&e).iter() {
-            if allocations.get(beneficiary) != Some(amount) {
-                panic_with_error!(&e, LockupBackfillError::InvalidAllocation);
-            }
-        }
-
         let mut config = Config {
             backstop,
             blnt,
@@ -343,6 +332,7 @@ impl BlntLockupBackfillContract {
             second_blnt_first: false,
             second_lp,
             source_backfill,
+            total_allocation: total,
             usdc,
             vesting_end,
             vesting_start,
@@ -373,7 +363,7 @@ impl BlntLockupBackfillContract {
         storage::set_lock(&e, true);
         let contract = e.current_contract_address();
         let balance = TokenClient::new(&e, &config.blnt).balance(&contract);
-        let outstanding = checked_sub(&e, TOTAL_ALLOCATION, storage::get_total_claimed(&e));
+        let outstanding = checked_sub(&e, config.total_allocation, storage::get_total_claimed(&e));
         if checked_add(&e, balance, amount) > outstanding {
             panic_with_error!(&e, LockupBackfillError::Overfunded);
         }
@@ -416,7 +406,7 @@ impl BlntLockupBackfillContract {
         state.payable
     }
 
-    pub fn claim_grant_and_fund(e: Env) -> GrantFundingResult {
+    pub fn claim_and_fund(e: Env) -> i128 {
         storage::extend(&e);
         require_unlocked(&e);
         let config = storage::get_config(&e);
@@ -436,7 +426,7 @@ impl BlntLockupBackfillContract {
         let first_budget = manager_budget / 2;
         let second_budget = checked_sub(&e, manager_budget, first_budget);
         let post_manager = checked_sub(&e, source_claimed, manager_budget);
-        let outstanding = checked_sub(&e, TOTAL_ALLOCATION, storage::get_total_claimed(&e));
+        let outstanding = checked_sub(&e, config.total_allocation, storage::get_total_claimed(&e));
         let funding_gap = outstanding.saturating_sub(contract_before);
         let lockup_amount = if storage::claims_closed(&e) {
             0
@@ -468,6 +458,21 @@ impl BlntLockupBackfillContract {
             config.second_blnt_first,
             &second_quote,
         );
+        let manager = BackstopManagerClient::new(&e, &config.manager);
+        let first_emission_lp = manager.b_claim(
+            &config.owner,
+            &config.backstop,
+            &BackstopTier::FirstLoss,
+            &config.pool,
+            &0,
+        );
+        let second_emission_lp = manager.b_claim(
+            &config.owner,
+            &config.backstop,
+            &BackstopTier::SecondLoss,
+            &config.pool,
+            &0,
+        );
         let first_lp = first_quote.lp;
         let second_lp = second_quote.lp;
         let routed = checked_add(&e, first_blnt, second_blnt);
@@ -482,32 +487,27 @@ impl BlntLockupBackfillContract {
         }
         storage::set_lock(&e, false);
 
-        let result = GrantFundingResult {
-            backstop_funded: true,
-            owner_retained,
-            grant_claimed: source_claimed,
-            lockup_funded: lockup_amount,
-        };
-        events::grant_funding(
+        events::claim_and_fund(
             &e,
-            GrantFundingDetails {
+            ClaimAndFundDetails {
                 backstop_budget: manager_budget,
-                backstop_funded: true,
                 backstop_unspent: manager_retained,
                 owner_retained,
                 first_backstop_shares,
                 first_blnt,
+                first_emission_lp,
                 first_lp,
                 first_xlm,
                 grant_claimed: source_claimed,
                 lockup_funded: lockup_amount,
                 second_backstop_shares,
                 second_blnt,
+                second_emission_lp,
                 second_lp,
                 second_usdc,
             },
         );
-        result
+        source_claimed
     }
 
     pub fn expire_claims(e: Env) -> i128 {
@@ -561,10 +561,10 @@ impl BlntLockupBackfillContract {
         storage::set_lock(&e, true);
         let config = storage::get_config(&e);
         let claimed = storage::get_total_claimed(&e);
-        let outstanding = checked_sub(&e, TOTAL_ALLOCATION, claimed);
+        let outstanding = checked_sub(&e, config.total_allocation, claimed);
         let custody = TokenClient::new(&e, &config.blnt).balance(&e.current_contract_address());
         let totals = Totals {
-            allocated: TOTAL_ALLOCATION,
+            allocated: config.total_allocation,
             claimed,
             custody,
             funding_gap: outstanding.saturating_sub(custody),

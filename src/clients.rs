@@ -34,6 +34,14 @@ pub trait BackstopManager {
         pool_address: Address,
         amount: i128,
     ) -> i128;
+    fn b_claim(
+        e: Env,
+        from: Address,
+        backstop: Address,
+        tier: BackstopTier,
+        pool_address: Address,
+        min_lp_tokens_out: i128,
+    ) -> i128;
 }
 
 #[allow(dead_code)]

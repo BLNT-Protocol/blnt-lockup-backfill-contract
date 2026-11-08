@@ -82,8 +82,8 @@ derived from the same production backfill basis:
 
 `74,000,000 BLNT / 14,610,061.9813817 LP-equivalent shares`.
 
-The production contract MUST contain exactly these immutable replacement
-allocations:
+The production deployment MUST supply exactly these immutable replacement
+allocations as constructor arguments:
 
 1. Lockup
    `CBJJOIRNZOFH5NGTU2SLFEAK4TB5P2KSOCOWTSWCTYNBSMMIBYFMFETV`
@@ -112,12 +112,22 @@ allocations:
    - pre-incident LP-equivalent shares: `263,612.1321711`;
    - replacement allocation: `1,335,196.1001616 BLNT`.
 
-The aggregate replacement allocation MUST be exactly
-`3,744,240.5803143 BLNT`. Construction MUST reject any missing, duplicate,
-non-positive, or additional allocation and any aggregate mismatch.
-The contract implementation MUST compare every constructor-supplied
-beneficiary and amount against this canonical table; matching only the entry
-count and aggregate is insufficient.
+The production deployment aggregate MUST be exactly
+`3,744,240.5803143 BLNT`. Deployment tooling and acceptance review MUST verify
+the exact four beneficiary/amount pairs, entry count, and aggregate against
+this table before instantiation. The contract MUST NOT embed or independently
+enforce this production-specific table, beneficiary count, or aggregate.
+Construction MUST reject a contract self-beneficiary, duplicate beneficiary,
+non-positive amount, or arithmetic overflow, and MUST derive and immutably
+store the deployment aggregate from the accepted constructor list.
+
+The committed `allocations/production.json` manifest is the production
+constructor source. Before a production constructor invocation, deployment
+tooling MUST run `make validate-production-allocations` and MUST obtain the
+complete `allocation_list` argument from `make production-allocation-args`.
+The validator MUST fail unless the manifest's digest, exact ordered entries,
+unique beneficiary count, and aggregate all match this section. Deployment
+tooling MUST NOT hand-construct or substitute that argument.
 
 These are full share-based replacement amounts. They intentionally include
 the V1 portions omitted from the production claimant manifest. The source
@@ -161,9 +171,9 @@ refund, governance, or allocation rights.
 Direct funding MUST fail after claims have been explicitly closed so newly
 transferred BLNT cannot become stranded.
 
-### 5.2 Atomic owner claim, lockup funding, and YieldBlent deposit
+### 5.2 Atomic owner claim, lockup funding, YieldBlent deposit, and emissions claim
 
-`claim_grant_and_fund() -> GrantFundingResult` MUST:
+`claim_and_fund() -> i128` MUST:
 
 1. require authorization by the immutable owner;
 2. invoke `claim_grant(owner)` on the canonical source backfill
@@ -191,10 +201,14 @@ transferred BLNT cannot become stranded.
     the canonical BLNT:USDC Comet V1.1 LP;
 14. deposit every LP share minted by that join into YieldBlent SecondLoss for
     the manager contract;
-15. leave `M - F_used - S_used` in the owner wallet without transferring it to
+15. claim the manager contract's accrued YieldBlent FirstLoss emissions for
+    the bound pool with a zero minimum LP output;
+16. claim the manager contract's accrued YieldBlent SecondLoss emissions for
+    the bound pool with a zero minimum LP output;
+17. leave `M - F_used - S_used` in the owner wallet without transferring it to
     the manager; and
-16. return the grant amount claimed, lockup funding, whether both backstop
-    deposits completed, and total BLNT retained by the owner.
+18. return exactly the grant amount `C` claimed from the source backfill
+    contract.
 
 The owner MUST retain `C - L - F_used - S_used`. This includes both the
 ordinary post-manager remainder and any unconsumed part of `M`. The one-third
@@ -203,15 +217,17 @@ separate manager-provided capital. The manager MUST be sufficiently pre-funded
 with both counterassets before invocation.
 
 The source claim, lockup contribution, BLNT transfer to the manager, both LP
-joins, and both backstop deposits MUST be one atomic call tree. The entrypoint
-MUST attempt the complete route without a preflight authorization, ownership,
-scope, or allowlist check. The backstop manager's live authorization and
-allowlist enforcement is authoritative. Failure of any authorization,
-allowlist, balance check, slippage bound, LP join, tier resolution, or backstop
-deposit MUST roll back the entire source claim and every transfer. The
-immutable backstop tier-token and Comet pair bindings MUST be validated during
-construction and MUST NOT be revalidated on each route invocation. Direct
-funding and beneficiary claims remain independent of the manager.
+joins, both backstop deposits, and both emissions claims MUST be one atomic
+call tree. The entrypoint MUST attempt the complete route without a preflight
+authorization, ownership, scope, allowlist, or claimable-emissions check. The
+backstop manager's live authorization and allowlist enforcement and the
+backstop's emissions-claim behavior are authoritative. Failure of any
+authorization, allowlist, balance check, slippage bound, LP join, tier
+resolution, backstop deposit, or emissions claim MUST roll back the entire
+source claim and every transfer. The immutable backstop tier-token and Comet
+pair bindings MUST be validated during construction and MUST NOT be
+revalidated on each route invocation. Direct funding and beneficiary claims
+remain independent of the manager.
 
 For each tier, every route invocation MUST query the bound Comet pool's current
 total LP supply, BLNT reserve, and counterasset reserve. Construction MUST
@@ -241,10 +257,10 @@ substitute legacy BLND, select a different pool or tier, or route funds to an
 unverified manager.
 
 The successful call MUST emit detailed accounting containing the grant amount,
-lockup funding, backstop budget and unspent portion, whether the backstop route
-completed, owner retention, and the BLNT, XLM or USDC, LP shares, and backstop
-shares used for each tier. These audit fields MUST NOT expand the compact
-`GrantFundingResult` return value.
+lockup funding, backstop budget and unspent portion, owner retention, the BLNT,
+XLM or USDC, LP shares, and backstop shares used for each tier, and the LP
+output returned by each emissions claim. These audit fields MUST remain in the
+event rather than expand the scalar return value.
 
 BLNT already claimed before this contract exists MUST be contributed through
 `fund`; it cannot be retroactively coupled to an earlier source claim.
@@ -354,7 +370,12 @@ one-time closure returns the remaining balance to the owner.
 
 Tests MUST cover:
 
-- exact production bindings and allocation aggregate;
+- constructor rejection of duplicate beneficiaries, non-positive allocations,
+  contract self-beneficiaries, and allocation-sum overflow;
+- correct derivation and immutable use of the constructor-supplied allocation
+  aggregate;
+- fail-closed production-manifest validation and exact constructor-argument
+  generation;
 - source vesting start, midpoint flooring, vesting end, and post-end claims;
 - deployment after `S` without restarting vesting;
 - each beneficiary and the merged-owner successor;
@@ -381,6 +402,8 @@ Tests MUST cover:
 - manager counterasset underfunding and per-join slippage failures;
 - rejection of substituted managers, pools, tiers, and LP tokens;
 - exact LP balance deltas and complete FirstLoss and SecondLoss deposits;
+- FirstLoss and SecondLoss emissions claims, including successful zero-output
+  claims and rollback when either claim fails;
 - rollback when either the first or second join or deposit fails;
 - automatic lockup funding capped by both the post-manager remainder and the
   current aggregate funding gap;
@@ -396,6 +419,7 @@ Tests MUST cover:
   closure; and
 - TTL extension and restoration behavior.
 
-Production deployment acceptance MUST independently reproduce the allocation
-inputs, optimized WASM hash, constructor arguments, source vesting timestamps,
-and contract bindings before any BLNT is funded.
+Production deployment acceptance MUST independently reproduce and validate the
+exact four canonical allocation inputs, their aggregate, optimized WASM hash,
+constructor arguments, source vesting timestamps, and contract bindings before
+any BLNT is funded.

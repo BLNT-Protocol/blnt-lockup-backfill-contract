@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "allocation_total_raw": "37442405803143",
+  "allocations": [
+    {
+      "beneficiary": "GBDVBOWFPYWJS3BVS4H4YYOGN7UTMR4TKKPJ77YK2N7LD7OVYI35NN52",
+      "amount_raw": "8892037498416"
+    },
+    {
+      "beneficiary": "GCQEFBTWQMZMKS2PAFUKQN7QE5YQ4SFSU5PTRAV7WETVT6LNKDE5ARA7",
+      "amount_raw": "7597459398743"
+    },
+    {
+      "beneficiary": "GANNTI6OTKR6WSOVOIGUMT7GMSSEPV3UL3W4VI22VLFW3NT5ABOZ2YFB",
+      "amount_raw": "7600947904368"
+    },
+    {
+      "beneficiary": "GBJXBKZ643REPENN3NBTVGNH3DCDJGVYQE3QDA37WMAERN4JE4HTZQCW",
+      "amount_raw": "13351961001616"
+    }
+  ]
+}

@@ -4,16 +4,29 @@ An immutable Soroban contract for voluntarily funded replacement BLNT
 backfill claims owed to the economic owners of four `blend-lockup v1.0.0`
 contracts.
 
-The contract hard-validates the four canonical beneficiary/allocation pairs
-at construction; a substituted address or amount cannot be deployed with the
-same aggregate total.
+The constructor accepts immutable beneficiary/allocation pairs, rejects
+duplicates and non-positive amounts, and derives the aggregate allocation used
+by funding and claim accounting. Production deployment tooling and review are
+responsible for verifying the exact four canonical pairs and aggregate before
+instantiation.
+
+For production, validate the committed manifest and generate the complete
+constructor argument from the same checked input:
+
+```sh
+make validate-production-allocations
+make production-allocation-args
+```
+
+Production deployment tooling must consume the second command's output as the
+`allocation_list` argument rather than constructing that argument separately.
 
 The contract preserves the deployed BLNT backfill contract's original
 360-day contributor-grant vesting epoch, supports partial funding without
 erasing unpaid entitlement, and keeps replacement claims open until the
 immutable owner explicitly closes them. The owner may close all remaining
 claims at any time and atomically return the complete remaining BLNT custody to
-the owner wallet. The no-argument `claim_grant_and_fund()` entrypoint provides
+the owner wallet. The no-argument `claim_and_fund()` entrypoint provides
 an atomic owner route that:
 
 1. claims the immutable owner's currently vested contributor grant;
@@ -24,8 +37,8 @@ an atomic owner route that:
 4. derives both proportional joins from current Comet reserves and supply with
    a fixed 1% XLM/USDC slippage ceiling;
 5. deposits the resulting LP shares into YieldBlent FirstLoss and SecondLoss;
-   and
-6. transfers only the exact BLNT consumed by each join, leaving proportional
+6. claims accrued YieldBlent emissions for both tiers; and
+7. transfers only the exact BLNT consumed by each join, leaving proportional
    join rounding and all remaining BLNT in the owner wallet.
 
 Construction verifies the initial backstop-manager ownership and allowlists as

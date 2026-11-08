@@ -1,6 +1,6 @@
 use soroban_sdk::{contractevent, Address, Env};
 
-use crate::types::GrantFundingDetails;
+use crate::types::ClaimAndFundDetails;
 
 #[contractevent(topics = ["fund"], data_format = "vec")]
 struct FundEvent {
@@ -18,9 +18,9 @@ struct ClaimEvent {
     total_claimed: i128,
 }
 
-#[contractevent(topics = ["grant_fund"], data_format = "single-value")]
-struct GrantFundingEvent {
-    details: GrantFundingDetails,
+#[contractevent(topics = ["claim_fund"], data_format = "single-value")]
+struct ClaimAndFundEvent {
+    details: ClaimAndFundDetails,
 }
 
 #[contractevent(topics = ["expire"], data_format = "vec")]
@@ -49,8 +49,8 @@ pub fn claim(e: &Env, beneficiary: Address, amount: i128, total_claimed: i128) {
     .publish(e);
 }
 
-pub fn grant_funding(e: &Env, details: GrantFundingDetails) {
-    GrantFundingEvent { details }.publish(e);
+pub fn claim_and_fund(e: &Env, details: ClaimAndFundDetails) {
+    ClaimAndFundEvent { details }.publish(e);
 }
 
 pub fn expire_claims(e: &Env, owner: Address, amount: i128, total_claimed: i128) {

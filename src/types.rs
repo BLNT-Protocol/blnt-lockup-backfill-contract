@@ -21,6 +21,7 @@ pub struct Config {
     pub second_blnt_first: bool,
     pub second_lp: Address,
     pub source_backfill: Address,
+    pub total_allocation: i128,
     pub usdc: Address,
     pub vesting_end: u64,
     pub vesting_start: u64,
@@ -49,28 +50,20 @@ pub struct Totals {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GrantFundingResult {
-    pub backstop_funded: bool,
-    pub owner_retained: i128,
-    pub grant_claimed: i128,
-    pub lockup_funded: i128,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GrantFundingDetails {
+pub struct ClaimAndFundDetails {
     pub backstop_budget: i128,
-    pub backstop_funded: bool,
     pub backstop_unspent: i128,
     pub owner_retained: i128,
     pub first_backstop_shares: i128,
     pub first_blnt: i128,
+    pub first_emission_lp: i128,
     pub first_lp: i128,
     pub first_xlm: i128,
     pub grant_claimed: i128,
     pub lockup_funded: i128,
     pub second_backstop_shares: i128,
     pub second_blnt: i128,
+    pub second_emission_lp: i128,
     pub second_lp: i128,
     pub second_usdc: i128,
 }

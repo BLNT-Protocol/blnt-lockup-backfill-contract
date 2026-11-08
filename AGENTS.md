@@ -19,8 +19,8 @@ and refund, and read-only accounting.
 Read `docs/SYSTEM_SPEC.md` completely before changing contract behavior. Its
 `MUST`, `MUST NOT`, `SHOULD`, and `MAY` statements are acceptance criteria.
 
-Evidence used to construct the immutable allocation table MUST remain
-reproducible from these external sources:
+Evidence used to validate the production deployment's immutable allocation
+constructor arguments MUST remain reproducible from these external sources:
 
 - the deployed BLNT backfill contract and its 360-day contributor-grant
   vesting timestamps;
@@ -34,8 +34,8 @@ contract, timestamp, or evidence hash.
 ## Critical invariants
 
 - Never mint BLNT or hold BLNT issuer/admin authority.
-- Never mutate an allocation, beneficiary, vesting epoch, or binding after
-  construction.
+- Never mutate a constructor-supplied allocation, beneficiary, vesting epoch,
+  or binding after construction.
 - Claims require authorization by the immutable beneficiary and pay only that
   beneficiary.
 - Funding never accelerates vesting.
@@ -55,15 +55,16 @@ contract, timestamp, or evidence hash.
   they MUST NOT preflight or fall back around a manager failure. The owner's
   canonical contributor-grant claim, automatically bounded lockup
   contribution, both internally quoted canonical Comet V1.1 LP joins, and
-  both YieldBlent deposits MUST all complete or all roll back. The Comet joins
-  MUST use the fixed 1% counterasset slippage ceiling.
-- `claim_grant_and_fund()` MUST accept no route arguments and return only the
-  grant claimed, lockup funding, whether the backstop was funded, and total
-  owner retention. Detailed per-tier accounting MUST remain in its event.
+  both YieldBlent deposits and emissions claims MUST all complete or all roll
+  back. The Comet joins MUST use the fixed 1% counterasset slippage ceiling.
+- `claim_and_fund()` MUST accept no route arguments and return exactly the
+  source grant amount claimed. Detailed route accounting MUST remain in its
+  event.
 - Use checked integer arithmetic and seven-decimal token units. Never use
   floating-point arithmetic in contract code or allocation generation.
-- Bound all maps and loops. Claim and funding entrypoints MUST be constant in
-  the number of beneficiaries.
+- Claim and funding entrypoints MUST be constant in the number of
+  beneficiaries. Production deployment checks MUST enforce the specified
+  four-entry allocation list even though the reusable WASM does not.
 - Do not add an administrator, upgrade, arbitrary recovery,
   governance, or beneficiary-mutation path. The only recovery path is the
   specified owner-authorized BLNT claim closure and refund.
@@ -78,7 +79,7 @@ contract changes:
 3. Test authorization, vesting boundaries, rounding, partial funding,
    repeated claims, overfunding, the one-third manager split, both LP joins,
    internal Comet quote rounding, the fixed slippage ceiling, both YieldBlent
-   deposits, closure authorization,
+   deposits and emissions claims, closure authorization,
    reentrancy, token-balance mismatches, arithmetic boundaries, and rollback.
 4. Build optimized `wasm32v1-none` WASM with the pinned toolchain.
 5. Verify source metadata and record the optimized WASM hash before any
