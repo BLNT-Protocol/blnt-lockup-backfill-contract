@@ -35,9 +35,8 @@ The production deployment MUST bind:
   the owner is also the source contributor-grant recipient and refund recipient;
 - a verified backstop-manager instance deployed and configured before this
   contract, which the immutable owner controls throughout the backfill period;
-  its production contract address remains
-  an open deployment binding until that instance is deployed and independently
-  verified;
+  the production binding is the source-attested manager
+  `CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB`;
 - the source backfill contract's immutable contributor-grant vesting start
   returned by `get_grant_vesting_start()`; and
 - the source backfill contract's immutable contributor-grant vesting end

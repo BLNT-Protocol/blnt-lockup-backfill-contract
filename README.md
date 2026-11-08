@@ -52,6 +52,13 @@ mutation, arbitrary recovery, or caller-selected refund recipient. See [the
 system specification](docs/SYSTEM_SPEC.md) for the normative requirements and
 deployment bindings.
 
+The production deployment binds the source-attested YieldBlent backstop
+manager
+`CAJUD2IQOVKPDZFJZEX2MSG7PKIE2NF4CJQ2ERBU7VF52SEM5GQL7XEB`. The immutable
+owner remains an explicit constructor argument and is intentionally not
+hardcoded in this repository. Production deployment must verify that the
+manager reports that same owner before constructing this contract.
+
 ## Development
 
 The workspace pins Rust 1.91.1 and Soroban SDK 27.0.3.
@@ -61,6 +68,6 @@ make test
 make build
 ```
 
-No production deployment is authorized or recorded yet. The backstop-manager
-binding remains open until its deployed instance and integration are
-independently verified.
+No production deployment is recorded yet. Deployment must use the exact
+source-attested release WASM and the migration repository's fail-closed
+deployment runner.
