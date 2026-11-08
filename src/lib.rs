@@ -15,6 +15,6 @@ mod test;
 
 pub use contract::{BlntLockupBackfillContract, BlntLockupBackfillContractClient};
 pub use errors::LockupBackfillError;
-pub use types::{BackstopTier, ClaimAndFundDetails, ClaimState, Config, Totals};
+pub use types::{ClaimAndFundDetails, ClaimState, Config, Totals};
 
 pub const VESTING_DURATION_SECONDS: u64 = 360 * 24 * 60 * 60;

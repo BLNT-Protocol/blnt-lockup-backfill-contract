@@ -49,16 +49,14 @@ contract, timestamp, or evidence hash.
   the immutable owner may atomically close claims and refund the contract's
   complete remaining BLNT custody to the owner address. Claims MUST remain open
   until that explicit call succeeds.
-- Construction MUST verify the initial backstop-manager ownership, allowlists,
-  tier tokens, and Comet pairs. Later owner-route calls MUST attempt the full
-  route and rely on the manager's live authorization and allowlist enforcement;
-  they MUST NOT preflight or fall back around a manager failure. The owner's
-  canonical contributor-grant claim, automatically bounded lockup
-  contribution, both internally quoted canonical Comet V1.1 LP joins, and
-  both YieldBlent deposits and emissions claims MUST all complete or all roll
-  back. The Comet joins MUST use the fixed 1% counterasset slippage ceiling.
-- `claim_and_fund()` MUST accept no route arguments and return exactly the
-  source grant amount claimed. Detailed route accounting MUST remain in its
+- Construction and every owner grant claim MUST verify that the immutable owner
+  owns the bound backstop manager. The owner's canonical contributor-grant
+  claim, automatically bounded lockup contribution, and exact one-third BLNT
+  transfer to that manager MUST all complete or all roll back. Later Comet LP,
+  backstop deposit, and emissions operations remain independent backstop-manager
+  responsibilities.
+- `claim_and_fund()` MUST accept no arguments and return exactly the source
+  grant amount claimed. Detailed allocation accounting MUST remain in its
   event.
 - Use checked integer arithmetic and seven-decimal token units. Never use
   floating-point arithmetic in contract code or allocation generation.
@@ -77,9 +75,8 @@ contract changes:
 1. Update the system specification first when behavior changes.
 2. Add or update focused native tests.
 3. Test authorization, vesting boundaries, rounding, partial funding,
-   repeated claims, overfunding, the one-third manager split, both LP joins,
-   internal Comet quote rounding, the fixed slippage ceiling, both YieldBlent
-   deposits and emissions claims, closure authorization,
+   repeated claims, overfunding, the one-third manager transfer, manager
+   ownership changes, exact balance reconciliation, closure authorization,
    reentrancy, token-balance mismatches, arithmetic boundaries, and rollback.
 4. Build optimized `wasm32v1-none` WASM with the pinned toolchain.
 5. Verify source metadata and record the optimized WASM hash before any

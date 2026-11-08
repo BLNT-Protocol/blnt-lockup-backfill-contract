@@ -1,17 +1,13 @@
 use crate::{
-    clients::{BackstopClient, BackstopManagerClient, CometClient, SourceBackfillClient},
+    clients::{BackstopManagerClient, SourceBackfillClient},
     errors::LockupBackfillError,
     events, storage,
-    types::{BackstopTier, ClaimAndFundDetails, ClaimState, Config, Totals},
+    types::{ClaimAndFundDetails, ClaimState, Config, Totals},
     VESTING_DURATION_SECONDS,
 };
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, token::TokenClient, Address, Env, Map, Vec, I256,
+    contract, contractimpl, panic_with_error, token::TokenClient, Address, Env, Map, Vec,
 };
-
-const COMET_SCALE: i128 = 1_000_000_000_000_000_000;
-const BPS_SCALE: i128 = 10_000;
-const JOIN_SLIPPAGE_BPS: i128 = 100;
 
 #[contract]
 pub struct BlntLockupBackfillContract;
@@ -32,48 +28,10 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(e, LockupBackfillError::Overflow))
 }
 
-fn mul_div_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-    I256::from_i128(e, value)
-        .mul(&I256::from_i128(e, numerator))
-        .div(&I256::from_i128(e, denominator))
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(e, LockupBackfillError::Overflow))
-}
-
-fn mul_div_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-    let product = I256::from_i128(e, value).mul(&I256::from_i128(e, numerator));
-    let divisor = I256::from_i128(e, denominator);
-    let quotient = product.div(&divisor);
-    let rounded = if product.rem_euclid(&divisor) == I256::from_i32(e, 0) {
-        quotient
-    } else {
-        quotient
-            .checked_add(&I256::from_i32(e, 1))
-            .unwrap_or_else(|| panic_with_error!(e, LockupBackfillError::Overflow))
-    };
-    rounded
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(e, LockupBackfillError::Overflow))
-}
-
 fn require_claims_open(e: &Env) {
     if storage::claims_closed(e) {
         panic_with_error!(e, LockupBackfillError::ClaimsClosed);
     }
-}
-
-fn contains(values: &Vec<Address>, expected: &Address) -> bool {
-    values.iter().any(|value| value == *expected)
-}
-
-fn valid_pair(tokens: &Vec<Address>, token_a: &Address, token_b: &Address) -> bool {
-    tokens.len() == 2 && contains(tokens, token_a) && contains(tokens, token_b)
 }
 
 fn transfer(e: &Env, token: &Address, from: &Address, to: &Address, amount: i128) {
@@ -139,159 +97,27 @@ fn claim_state(e: &Env, beneficiary: &Address) -> ClaimState {
     }
 }
 
-fn validate_constructor_bindings(e: &Env, config: &Config) -> (bool, bool) {
-    let backstop = BackstopClient::new(e, &config.backstop);
-    if backstop.backstop_token(&BackstopTier::FirstLoss, &config.pool) != config.first_lp
-        || backstop.backstop_token(&BackstopTier::SecondLoss, &config.pool) != config.second_lp
-    {
-        panic_with_error!(e, LockupBackfillError::InvalidTierToken);
-    }
-    let first_tokens = CometClient::new(e, &config.first_lp).get_tokens();
-    let second_tokens = CometClient::new(e, &config.second_lp).get_tokens();
-    if !valid_pair(&first_tokens, &config.blnt, &config.xlm)
-        || !valid_pair(&second_tokens, &config.blnt, &config.usdc)
-    {
-        panic_with_error!(e, LockupBackfillError::InvalidTierToken);
-    }
-    (
-        first_tokens.get_unchecked(0) == config.blnt,
-        second_tokens.get_unchecked(0) == config.blnt,
-    )
-}
-
 fn validate_manager(e: &Env, config: &Config) {
     let client = BackstopManagerClient::new(e, &config.manager);
     if client.owner() != config.owner {
         panic_with_error!(e, LockupBackfillError::InvalidManager);
     }
-    if !contains(&client.backstops(), &config.backstop) {
-        panic_with_error!(e, LockupBackfillError::InvalidBackstop);
-    }
-    if !contains(&client.pools(), &config.pool) {
-        panic_with_error!(e, LockupBackfillError::InvalidPool);
-    }
-}
-
-struct JoinQuote {
-    blnt: i128,
-    lp: i128,
-    pair: i128,
-    max_pair: i128,
-}
-
-fn quote_join(
-    e: &Env,
-    config: &Config,
-    lp: &Address,
-    pair: &Address,
-    blnt_budget: i128,
-) -> JoinQuote {
-    if blnt_budget <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-    let client = CometClient::new(e, lp);
-    let supply = client.get_total_supply();
-    let blnt_reserve = client.get_balance(&config.blnt);
-    let pair_reserve = client.get_balance(pair);
-    if supply <= 0 || blnt_reserve <= 0 || pair_reserve <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-
-    // Comet rounds the join ratio and both proportional inputs up. Compute the
-    // greatest LP output whose rounded BLNT input cannot exceed this tier's
-    // immutable share of the claimed grant.
-    let max_ratio = mul_div_floor(e, blnt_budget, COMET_SCALE, blnt_reserve);
-    let lp_amount = mul_div_floor(e, max_ratio, supply, COMET_SCALE);
-    if lp_amount <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-    let join_ratio = mul_div_ceil(e, lp_amount, COMET_SCALE, supply);
-    let blnt_amount = mul_div_ceil(e, blnt_reserve, join_ratio, COMET_SCALE);
-    let pair_amount = mul_div_ceil(e, pair_reserve, join_ratio, COMET_SCALE);
-    if blnt_amount <= 0 || blnt_amount > blnt_budget || pair_amount <= 0 {
-        panic_with_error!(e, LockupBackfillError::InvalidRoute);
-    }
-    let max_pair = mul_div_ceil(e, pair_amount, BPS_SCALE + JOIN_SLIPPAGE_BPS, BPS_SCALE);
-    JoinQuote {
-        blnt: blnt_amount,
-        lp: lp_amount,
-        pair: pair_amount,
-        max_pair,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn join_and_deposit(
-    e: &Env,
-    config: &Config,
-    tier: BackstopTier,
-    lp: &Address,
-    blnt_first: bool,
-    quote: &JoinQuote,
-) -> (i128, i128, i128) {
-    let mut max_amounts = Vec::new(e);
-    if blnt_first {
-        max_amounts.push_back(quote.blnt);
-        max_amounts.push_back(quote.max_pair);
-    } else {
-        max_amounts.push_back(quote.max_pair);
-        max_amounts.push_back(quote.blnt);
-    }
-
-    let contract = config.manager.clone();
-    let lp_client = TokenClient::new(e, lp);
-    let lp_before = lp_client.balance(&contract);
-
-    let manager = BackstopManagerClient::new(e, &config.manager);
-    manager.c_join_pool(
-        &config.owner,
-        &config.backstop,
-        &tier,
-        &config.pool,
-        &quote.lp,
-        &max_amounts,
-    );
-
-    let backstop_shares = manager.b_deposit(
-        &config.owner,
-        &config.backstop,
-        &tier,
-        &config.pool,
-        &quote.lp,
-    );
-    if lp_client.balance(&contract) != lp_before {
-        panic_with_error!(e, LockupBackfillError::BalanceMismatch);
-    }
-    (quote.blnt, quote.pair, backstop_shares)
 }
 
 #[contractimpl]
 impl BlntLockupBackfillContract {
-    #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
         blnt: Address,
         source_backfill: Address,
         owner: Address,
         manager: Address,
-        backstop: Address,
-        pool: Address,
-        first_lp: Address,
-        second_lp: Address,
-        xlm: Address,
-        usdc: Address,
         allocation_list: Vec<(Address, i128)>,
     ) {
         let contract = e.current_contract_address();
         if owner == contract
             || manager == contract
             || source_backfill == contract
-            || blnt == first_lp
-            || blnt == second_lp
-            || blnt == xlm
-            || blnt == usdc
-            || first_lp == second_lp
-            || xlm == usdc
             || TokenClient::new(&e, &blnt).decimals() != 7
         {
             panic_with_error!(&e, LockupBackfillError::InvalidConfig);
@@ -321,26 +147,15 @@ impl BlntLockupBackfillContract {
             total = checked_add(&e, total, amount);
             allocations.set(beneficiary, amount);
         }
-        let mut config = Config {
-            backstop,
+        let config = Config {
             blnt,
-            first_blnt_first: false,
             owner,
-            first_lp,
             manager,
-            pool,
-            second_blnt_first: false,
-            second_lp,
             source_backfill,
             total_allocation: total,
-            usdc,
             vesting_end,
             vesting_start,
-            xlm,
         };
-        let (first_blnt_first, second_blnt_first) = validate_constructor_bindings(&e, &config);
-        config.first_blnt_first = first_blnt_first;
-        config.second_blnt_first = second_blnt_first;
         validate_manager(&e, &config);
         storage::set_config(&e, &config);
         storage::set_allocations(&e, &allocations);
@@ -413,6 +228,7 @@ impl BlntLockupBackfillContract {
         config.owner.require_auth();
 
         storage::set_lock(&e, true);
+        validate_manager(&e, &config);
         let blnt = TokenClient::new(&e, &config.blnt);
         let contract = e.current_contract_address();
         let owner_before = blnt.balance(&config.owner);
@@ -422,10 +238,8 @@ impl BlntLockupBackfillContract {
         let source_claimed =
             SourceBackfillClient::new(&e, &config.source_backfill).claim_grant(&config.owner);
 
-        let manager_budget = source_claimed / 3;
-        let first_budget = manager_budget / 2;
-        let second_budget = checked_sub(&e, manager_budget, first_budget);
-        let post_manager = checked_sub(&e, source_claimed, manager_budget);
+        let manager_amount = source_claimed / 3;
+        let post_manager = checked_sub(&e, source_claimed, manager_amount);
         let outstanding = checked_sub(&e, config.total_allocation, storage::get_total_claimed(&e));
         let funding_gap = outstanding.saturating_sub(contract_before);
         let lockup_amount = if storage::claims_closed(&e) {
@@ -437,50 +251,16 @@ impl BlntLockupBackfillContract {
         if lockup_amount > 0 {
             blnt.transfer(&config.owner, &contract, &lockup_amount);
         }
-        let first_quote = quote_join(&e, &config, &config.first_lp, &config.xlm, first_budget);
-        let second_quote = quote_join(&e, &config, &config.second_lp, &config.usdc, second_budget);
-        let routed = checked_add(&e, first_quote.blnt, second_quote.blnt);
-        blnt.transfer(&config.owner, &config.manager, &routed);
-
-        let (first_blnt, first_xlm, first_backstop_shares) = join_and_deposit(
+        if manager_amount > 0 {
+            blnt.transfer(&config.owner, &config.manager, &manager_amount);
+        }
+        let owner_retained = checked_sub(
             &e,
-            &config,
-            BackstopTier::FirstLoss,
-            &config.first_lp,
-            config.first_blnt_first,
-            &first_quote,
+            checked_sub(&e, source_claimed, lockup_amount),
+            manager_amount,
         );
-        let (second_blnt, second_usdc, second_backstop_shares) = join_and_deposit(
-            &e,
-            &config,
-            BackstopTier::SecondLoss,
-            &config.second_lp,
-            config.second_blnt_first,
-            &second_quote,
-        );
-        let manager = BackstopManagerClient::new(&e, &config.manager);
-        let first_emission_lp = manager.b_claim(
-            &config.owner,
-            &config.backstop,
-            &BackstopTier::FirstLoss,
-            &config.pool,
-            &0,
-        );
-        let second_emission_lp = manager.b_claim(
-            &config.owner,
-            &config.backstop,
-            &BackstopTier::SecondLoss,
-            &config.pool,
-            &0,
-        );
-        let first_lp = first_quote.lp;
-        let second_lp = second_quote.lp;
-        let routed = checked_add(&e, first_blnt, second_blnt);
-        let manager_retained = checked_sub(&e, manager_budget, routed);
-        let owner_retained =
-            checked_sub(&e, checked_sub(&e, source_claimed, lockup_amount), routed);
         if blnt.balance(&contract).checked_sub(contract_before) != Some(lockup_amount)
-            || blnt.balance(&config.manager) != manager_before
+            || blnt.balance(&config.manager).checked_sub(manager_before) != Some(manager_amount)
             || blnt.balance(&config.owner).checked_sub(owner_before) != Some(owner_retained)
         {
             panic_with_error!(&e, LockupBackfillError::BalanceMismatch);
@@ -490,21 +270,10 @@ impl BlntLockupBackfillContract {
         events::claim_and_fund(
             &e,
             ClaimAndFundDetails {
-                backstop_budget: manager_budget,
-                backstop_unspent: manager_retained,
-                owner_retained,
-                first_backstop_shares,
-                first_blnt,
-                first_emission_lp,
-                first_lp,
-                first_xlm,
                 grant_claimed: source_claimed,
                 lockup_funded: lockup_amount,
-                second_backstop_shares,
-                second_blnt,
-                second_emission_lp,
-                second_lp,
-                second_usdc,
+                manager_funded: manager_amount,
+                owner_retained,
             },
         );
         source_claimed

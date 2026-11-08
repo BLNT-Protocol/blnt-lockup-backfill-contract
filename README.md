@@ -26,29 +26,21 @@ The contract preserves the deployed BLNT backfill contract's original
 erasing unpaid entitlement, and keeps replacement claims open until the
 immutable owner explicitly closes them. The owner may close all remaining
 claims at any time and atomically return the complete remaining BLNT custody to
-the owner wallet. The no-argument `claim_and_fund()` entrypoint provides
-an atomic owner route that:
+the owner wallet. The no-argument `claim_and_fund()` entrypoint atomically:
 
 1. claims the immutable owner's currently vested contributor grant;
 2. automatically funds as much of the outstanding lockup-owner obligation as
-   possible from the two-thirds not reserved for the manager route;
-3. budgets one-third of the source claim equally by BLNT amount across the
-   canonical BLNT:XLM and BLNT:USDC Comet V1.1 pools;
-4. derives both proportional joins from current Comet reserves and supply with
-   a fixed 1% XLM/USDC slippage ceiling;
-5. deposits the resulting LP shares into YieldBlent FirstLoss and SecondLoss;
-6. claims accrued YieldBlent emissions for both tiers; and
-7. transfers only the exact BLNT consumed by each join, leaving proportional
-   join rounding and all remaining BLNT in the owner wallet.
+   possible from the two-thirds not reserved for manager funding;
+3. transfers exactly one-third of the source claim to the bound backstop
+   manager; and
+4. leaves all remaining BLNT in the owner wallet.
 
-Construction verifies the initial backstop-manager ownership and allowlists as
-well as the immutable tier-token and Comet-pair bindings. Each later
-contributor-grant claim attempts the complete route and relies on the manager's
-live authorization and allowlist enforcement. A separate manager such as YBX
-DAO or YSC may operate the position within its configured scope but cannot
-authorize contributor-grant claims. If any manager authorization, allowlist,
-join, or deposit operation fails, the source claim and every related transfer
-roll back atomically so the configuration can be corrected and retried.
+Construction and every contributor-grant claim verify that the immutable owner
+owns the bound backstop manager. A separate manager such as YBX DAO or YSC may
+later join Comet pools, deposit LP shares, and claim emissions within its
+configured scope, but cannot authorize contributor-grant claims. Those later
+operations are deliberately decoupled so temporary counterasset, reserve,
+slippage, or backstop conditions cannot block the source grant claim.
 
 The intended funding sequence is a direct initial contribution from BLNT
 already held by the owner, followed by optional top-ups from later vested
