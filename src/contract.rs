@@ -97,6 +97,22 @@ fn claim_state(e: &Env, beneficiary: &Address) -> ClaimState {
     }
 }
 
+fn vested_funding_gap(e: &Env, config: &Config, custody: i128) -> i128 {
+    let vested = vested_amount(
+        e,
+        config.total_allocation,
+        e.ledger().timestamp(),
+        config.vesting_start,
+        config.vesting_end,
+    );
+    let vested_unclaimed = checked_sub(e, vested, storage::get_total_claimed(e));
+    if custody >= vested_unclaimed {
+        0
+    } else {
+        checked_sub(e, vested_unclaimed, custody)
+    }
+}
+
 fn validate_manager(e: &Env, config: &Config) {
     let client = BackstopManagerClient::new(e, &config.manager);
     if client.owner() != config.owner {
@@ -240,8 +256,7 @@ impl BlntLockupBackfillContract {
 
         let manager_amount = source_claimed / 3;
         let post_manager = checked_sub(&e, source_claimed, manager_amount);
-        let outstanding = checked_sub(&e, config.total_allocation, storage::get_total_claimed(&e));
-        let funding_gap = outstanding.saturating_sub(contract_before);
+        let funding_gap = vested_funding_gap(&e, &config, contract_before);
         let lockup_amount = if storage::claims_closed(&e) {
             0
         } else {
@@ -336,7 +351,7 @@ impl BlntLockupBackfillContract {
             allocated: config.total_allocation,
             claimed,
             custody,
-            funding_gap: outstanding.saturating_sub(custody),
+            funding_gap: vested_funding_gap(&e, &config, custody),
             outstanding,
         };
         storage::set_lock(&e, false);

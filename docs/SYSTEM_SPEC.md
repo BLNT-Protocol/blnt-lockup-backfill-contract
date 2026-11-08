@@ -167,9 +167,11 @@ transferred BLNT cannot become stranded.
 3. invoke `claim_grant(owner)` on the canonical source backfill
    contract and read the exact positive amount `C` returned;
 4. calculate the manager funding amount as `M = floor(C / 3)`;
-5. calculate the remaining replacement-claim funding gap as aggregate
-   outstanding entitlement less current contract BLNT custody, floored at
-   zero;
+5. calculate the aggregate vested replacement entitlement by applying the
+   section 4 vesting formula to the aggregate immutable allocation, subtract
+   aggregate successful beneficiary claims, then calculate the current
+   replacement-claim funding gap as that vested-and-unclaimed amount less
+   current contract BLNT custody, floored at zero;
 6. while claims are open, set the lockup-funding amount `L` to the lesser of
    that funding gap and `C - M`; after claims are closed, set `L = 0`;
 7. require a pre-existing BLNT allowance from the owner to this contract
@@ -202,11 +204,14 @@ deposit LP shares, or claim emissions.
 BLNT already claimed before this contract exists MUST be contributed through
 `fund`; it cannot be retroactively coupled to an earlier source claim.
 The intended funding sequence is an initial direct contribution of already
-claimed BLNT followed by automatically bounded top-ups from later
-contributor-grant claims. Once the replacement obligation is fully funded,
-the inferred `L` MUST remain zero so the owner can continue claiming the
-contributor grant and completing the manager funding transfer without overfunding this
-contract.
+claimed BLNT sufficient to cover replacement entitlement vested at that time,
+followed by automatically bounded top-ups as additional replacement entitlement
+vests. Unvested replacement entitlement MUST NOT consume the owner's current
+contributor-grant claim. When custody covers all currently vested-and-unclaimed
+replacement entitlement, the inferred `L` MUST remain zero so the owner retains
+`C - M`. When vesting later creates a new shortfall, only that current shortfall
+MAY be funded from a later contributor-grant claim. At vesting end the same
+formula converges on the complete remaining replacement obligation.
 
 After claims have been explicitly closed, the atomic owner operation MUST infer a
 zero lockup-funding amount. It MAY continue to claim the owner's source grant
@@ -270,15 +275,16 @@ The contract SHOULD expose only the views required to independently verify:
 - whether claims have been closed;
 - each beneficiary's immutable allocation, cumulative vested amount,
   cumulative claimed amount, and currently payable amount;
-- aggregate allocated, claimed, outstanding, funded-custody, and funding-gap
-  amounts; and
+- aggregate allocated, claimed, outstanding, funded-custody, and currently
+  vested funding-gap amounts; and
 - the complete bounded beneficiary list.
 
 `currently payable` MUST reflect both vesting and current contract custody.
 `outstanding` MUST include vested and unvested unclaimed allocations.
-`funding gap` MUST equal outstanding allocation less current BLNT custody.
-After closure, `outstanding` and `funding gap` remain historical accounting
-values and do not reopen claims or authorize new funding.
+`funding gap` MUST equal aggregate vested allocation less aggregate claimed and
+current BLNT custody, floored at zero. `outstanding` MUST continue to report the
+complete vested and unvested unclaimed allocation. After closure these values
+remain informational and do not reopen claims or authorize new funding.
 
 ## 9. Security and lifecycle
 
@@ -328,7 +334,11 @@ Tests MUST cover:
 - complete rollback when manager ownership is transferred prematurely;
 - exact lockup, manager, and owner BLNT balance reconciliation;
 - automatic lockup funding capped by both the post-manager remainder and the
-  current aggregate funding gap;
+  current aggregate vested funding gap;
+- pre-funding that covers the current aggregate vested entitlement causing the
+  owner to retain the complete post-manager portion of the source claim;
+- later vesting reopening only the newly accrued replacement-funding gap rather
+  than front-loading future entitlement;
 - already-claimed owner funds through `fund`;
 - transfer failures, reentrancy, overflow, and state rollback;
 - full funding and full distribution with zero remaining entitlement;

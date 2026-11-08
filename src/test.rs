@@ -14,6 +14,16 @@ const ALLOCATION_2: i128 = 7_600_947_904_368;
 const ALLOCATION_3: i128 = 13_351_961_001_616;
 const TOTAL_ALLOCATION: i128 = ALLOCATION_0 + ALLOCATION_1 + ALLOCATION_2 + ALLOCATION_3;
 
+fn aggregate_vested_at(now: u64, start: u64) -> i128 {
+    if now <= start {
+        0
+    } else if now >= start + VESTING_DURATION_SECONDS {
+        TOTAL_ALLOCATION
+    } else {
+        TOTAL_ALLOCATION * i128::from(now - start) / i128::from(VESTING_DURATION_SECONDS)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 #[allow(clippy::enum_variant_names)]
@@ -736,6 +746,50 @@ fn claim_and_fund_splits_blnt_between_lockups_and_manager() {
 }
 
 #[test]
+fn prefunding_current_vested_entitlement_leaves_post_manager_claim_with_owner() {
+    let fixture = Fixture::create(900);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    let funder = Address::generate(&fixture.e);
+    let vested = aggregate_vested_at(fixture.e.ledger().timestamp(), fixture.start);
+    token.mint(&funder, &vested);
+    fixture.client().fund(&funder, &vested);
+    assert_eq!(fixture.client().get_totals().funding_gap, 0);
+
+    assert_eq!(fixture.client().claim_and_fund(), 900);
+    assert_eq!(token.balance(&fixture.contract), vested);
+    assert_eq!(token.balance(&fixture.manager), 300);
+    assert_eq!(token.balance(&fixture.owner), 600);
+}
+
+#[test]
+fn later_vesting_reopens_only_the_newly_accrued_funding_gap() {
+    let fixture = Fixture::create(10_000_000);
+    let token = MockTokenClient::new(&fixture.e, &fixture.blnt);
+    let funder = Address::generate(&fixture.e);
+    let before = aggregate_vested_at(fixture.e.ledger().timestamp(), fixture.start);
+    token.mint(&funder, &before);
+    fixture.client().fund(&funder, &before);
+
+    fixture
+        .e
+        .ledger()
+        .set_timestamp(fixture.e.ledger().timestamp() + 1);
+    let after = aggregate_vested_at(fixture.e.ledger().timestamp(), fixture.start);
+    let newly_vested = after - before;
+    assert!(newly_vested > 0 && newly_vested < 10_000_000 - 10_000_000 / 3);
+    assert_eq!(fixture.client().get_totals().funding_gap, newly_vested);
+
+    assert_eq!(fixture.client().claim_and_fund(), 10_000_000);
+    assert_eq!(token.balance(&fixture.contract), after);
+    assert_eq!(token.balance(&fixture.manager), 10_000_000 / 3);
+    assert_eq!(
+        token.balance(&fixture.owner),
+        10_000_000 - 10_000_000 / 3 - newly_vested
+    );
+    assert_eq!(fixture.client().get_totals().funding_gap, 0);
+}
+
+#[test]
 fn claim_and_fund_auth_remains_valid_when_the_grant_changes_after_preparation() {
     let fixture = Fixture::create(900);
     fixture.e.set_auths(&[]);
@@ -1239,7 +1293,8 @@ fn full_funding_and_distribution_leave_no_outstanding_claims() {
 fn claim_and_fund_caps_lockup_funding_at_the_remaining_gap() {
     let fixture = Fixture::create(900);
     let funder = Address::generate(&fixture.e);
-    let initial_funding = TOTAL_ALLOCATION - 100;
+    let vested = aggregate_vested_at(fixture.e.ledger().timestamp(), fixture.start);
+    let initial_funding = vested - 100;
     MockTokenClient::new(&fixture.e, &fixture.blnt).mint(&funder, &initial_funding);
     fixture.client().fund(&funder, &initial_funding);
     let result = fixture.client().claim_and_fund();
@@ -1248,5 +1303,6 @@ fn claim_and_fund_caps_lockup_funding_at_the_remaining_gap() {
         MockTokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.owner),
         500
     );
-    assert_eq!(fixture.client().get_totals().custody, TOTAL_ALLOCATION);
+    assert_eq!(fixture.client().get_totals().custody, vested);
+    assert_eq!(fixture.client().get_totals().funding_gap, 0);
 }

@@ -29,8 +29,8 @@ claims at any time and atomically return the complete remaining BLNT custody to
 the owner wallet. The no-argument `claim_and_fund()` entrypoint atomically:
 
 1. claims the immutable owner's currently vested contributor grant;
-2. automatically funds as much of the outstanding lockup-owner obligation as
-   possible from the two-thirds not reserved for manager funding;
+2. automatically funds the currently vested lockup-owner shortfall, capped by
+   the two-thirds not reserved for manager funding;
 3. transfers exactly one-third of the source claim to the bound backstop
    manager; and
 4. leaves all remaining BLNT in the owner wallet.
@@ -43,9 +43,11 @@ operations are deliberately decoupled so temporary counterasset, reserve,
 slippage, or backstop conditions cannot block the source grant claim.
 
 The intended funding sequence is a direct initial contribution from BLNT
-already held by the owner, followed by optional top-ups from later vested
-contributor-grant claims. A zero top-up remains valid after the replacement
-claims are fully funded.
+already held by the owner sufficient to cover replacement entitlement vested
+at that time, followed by bounded top-ups as additional replacement entitlement
+vests. Future unvested lockup entitlement does not consume the owner's current
+contributor-grant claim. A zero top-up remains valid whenever custody covers
+the currently vested-and-unclaimed replacement entitlement.
 
 Before invoking `claim_and_fund()`, the owner must approve this contract as a
 BLNT spender for an amount and expiration sufficient to cover the inferred
